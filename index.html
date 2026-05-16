@@ -2852,7 +2852,7 @@ white-space: normal;
                 
                 // Evaluar estado actual
                 const currentAct = getCurrentActivity(location.actividades);
-                const tooltipText = currentAct ? `🔴 AHORA: ${currentAct.nombre}` : `⚪ Sin actividad actual`;
+                const tooltipText = currentAct ? `🔴 ${currentAct.nombre}` : `⚪ Sin actividad actual`;
                 const tooltipClass = currentAct ? 'custom-tooltip' : 'custom-tooltip tooltip-inactive';
 
                 // Añadir etiqueta (Tooltip) visible permanentemente
@@ -2882,7 +2882,7 @@ white-space: normal;
                 const item = markersMap[id];
                 const currentAct = getCurrentActivity(item.data.actividades);
                 
-                const tooltipText = currentAct ? `🔴 AHORA: ${currentAct.nombre}` : `⚪ Sin actividad actual`;
+                const tooltipText = currentAct ? `🔴 ${currentAct.nombre}` : `⚪ Sin actividad actual`;
                 const tooltipClass = currentAct ? 'custom-tooltip' : 'custom-tooltip tooltip-inactive';
                 
                 // Actualizar el contenido y estilo del tooltip
