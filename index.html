@@ -1,0 +1,2961 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mapa Dinámico de Eventos</title>
+    
+    <!-- Tailwind CSS para el diseño de la interfaz -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Leaflet CSS para el mapa -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    
+    <style>
+        /* Estilos base para asegurar que el mapa ocupe la pantalla completa */
+        body, html { margin: 0; padding: 0; height: 100%; overflow: hidden; font-family: sans-serif; }
+        #map { height: 100vh; width: 100vw; z-index: 10; }
+        
+        /* Panel lateral para mostrar detalles, por defecto oculto o desplazado */
+        #details-panel {
+            transition: transform 0.3s ease-in-out;
+            z-index: 50; /* Por encima del mapa */
+        }
+        .panel-hidden { transform: translateX(100%); }
+        .panel-visible { transform: translateX(0); }
+
+        /* Estilo personalizado para las etiquetas de los marcadores (Tooltips) */
+        .custom-tooltip {
+            background-color: #1e40af;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            font-weight: bold;
+            padding: 4px 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+            cursor: pointer;
+        }
+        .tooltip-inactive {
+            background-color: #6b7280; /* Gris si no hay actividad */
+        }
+
+/* Efecto hover sutil para el tooltip para indicar interactividad */
+        .custom-tooltip:hover {
+            transform: scale(1.05);
+            transition: transform 0.2s;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 relative">
+
+    <!-- Contenedor Principal del Mapa -->
+    <div id="map"></div>
+
+    <!-- Panel Lateral de Detalles de la Ubicación -->
+    <div id="details-panel" class="absolute top-0 right-0 h-full w-full md:w-96 bg-white shadow-2xl panel-hidden flex flex-col">
+        <!-- Encabezado del Panel -->
+        <div class="bg-blue-600 text-white p-4 flex justify-between items-center">
+            <h2 id="panel-title" class="text-xl font-bold truncate">Nombre del Lugar</h2>
+            <button onclick="closePanel()" class="text-white hover:text-gray-200 focus:outline-none">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+            </button>
+        </div>
+        
+        <!-- Contenido del Panel -->
+        <div class="p-6 overflow-y-auto flex-1">
+            <!-- Sección de Contacto -->
+            <div class="mb-6 bg-blue-50 p-4 rounded-lg border border-blue-100">
+                <h3 class="text-sm font-semibold text-blue-800 uppercase tracking-wider mb-2">Información de Contacto</h3>
+                <p class="text-gray-700 flex items-center mb-1"><span class="font-medium w-20">Teléfono:</span> <span id="panel-phone"></span></p>
+                <p class="text-gray-700 flex items-center mb-1"><span class="font-medium w-20">Dirección:</span> <span id="panel-email"></span></p>
+
+            </div>
+
+            <!-- Sección de Actividades -->
+            <div>
+                <h3 class="text-sm font-semibold text-gray-800 uppercase tracking-wider mb-3 border-b pb-2">Cronograma de Actividades</h3>
+                <ul id="panel-activities" class="space-y-4">
+                    <!-- Las actividades se inyectarán aquí vía JavaScript -->
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <script>
+        // ==========================================
+        // 1. GENERACIÓN DE DATOS SIMULADOS (MOCK JSON)
+        // ==========================================
+        // Para que la app sea interactiva inmediatamente, generamos horarios basados en tu hora actual.
+        const now = new Date();
+        const currentHour = now.getHours();
+        const currentMin = now.getMinutes();
+        
+        // Función auxiliar para formatear la hora (ej: "14:30")
+        const formatTime = (h, m) => `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+
+        // El "JSON" de entrada que tu sistema cargaría
+        const jsonData =
+            [
+  {
+    "id": "academia-numismatica-internacional",
+    "nombre": "Academia Numismática Internacional",
+    "direccion": "Museo de Historia - UAGRM (calle Junín # 151)",
+    "lat": -17.782987794477183,
+    "lng": -63.18317307187927,
+    "area": "Otro",
+    "responsable": "José Ignacio Pantoja Orihuela",
+    "whatsapp": "70863302",
+    "redes": {
+      "facebook": "https://www.facebook.com/AcademiaNumInt",
+      "instagram": "https://www.instagram.com/academianumint"
+    },
+    "descripcion": "La Academia Numismática Internacional tiene como fin trabajar en la difusión, divulgación e investigación desde un ámbito histórico y cultural de la materia numismática, que comprende el estudio de monedas, billetes, medallas, bonos, cheques, empréstitos u otros relacionados a la historia económica de Bolivia y del mundo.",
+    "inicio_actividades": "15:00",
+    "fin_actividades": "22:00",
+    "num_actividades": 1,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/academia-numismatica-internacional-HMPXAVKMRI.jpg",
+    "actividades": [
+      {
+        "nombre": "Exposición de monedas, billetes, medallas y documentos de Bolivia y de diferentes países del mundo.",
+        "inicio": "15:00",
+        "fin": "22:00"
+      }
+    ]
+  },
+  {
+    "id": "apcob",
+    "nombre": "Apoyo Para el Campesino-Indígena del Oriente Boliviano, APCOB",
+    "direccion": "Calle Alfredo Jordán # 79, entre avenida Landívar y calle Ingavi (Pedro Vélez)",
+    "lat": -17.78544633012637,
+    "lng": -63.19323362634556,
+    "area": "Otro",
+    "responsable": "Patricia Patiño",
+    "whatsapp": "72668969",
+    "redes": {
+      "facebook": "https://www.facebook.com/apcobolivia",
+      "instagram": "https://www.instagram.com/apcobscz"
+    },
+    "descripcion": "Apoyo Para el Campesino-Indígena del Oriente Boliviano (APCOB) es una asociación civil sin fines de lucro que promueve el desarrollo integral y el ejercicio pleno de los derechos individuales y colectivos de los pueblos indígenas de tierras bajas de Bolivia.",
+    "inicio_actividades": "17:00",
+    "fin_actividades": "23:00",
+    "num_actividades": 4,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/apcob-DXCERV7GZV.jpg",
+    "actividades": []
+  },
+  {
+    "id": "artemisa-coffee-bar",
+    "nombre": "Artemisa Coffee Bar",
+    "direccion": "Barrio Equipetrol, avenida San Martín, calle Pablo Sanz # 28",
+    "lat": -17.761941,
+    "lng": -63.195568,
+    "area": "Cafetería",
+    "responsable": "Ramiro Buitrago",
+    "whatsapp": "75380798",
+    "redes": {
+      "facebook": "https://www.facebook.com/artemisacoffeebar",
+      "instagram": "https://www.instagram.com/artemisa.coffeebar"
+    },
+    "descripcion": "Artemisa Coffee Bar es un espacio creativo donde se da visibilidad a los artistas y a las marcas de diseño boliviano. También se promueven los eventos culturales de la ciudad.",
+    "inicio_actividades": "18:00",
+    "fin_actividades": "00:00",
+    "num_actividades": 2,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/artemisa-coffee-bar-TWJ2JD5AKW.jpg",
+    "actividades": [
+      {
+        "nombre": "Actividades artísticas y culturales.",
+        "inicio": "18:00",
+        "fin": "00:00"
+      }
+    ]
+  },
+  {
+    "id": "asociacion-boliviana-de-artistas-plasticos-abap",
+    "nombre": "Asociación Boliviana de Artistas Plásticos de Santa Cruz, ABAP SCZ",
+    "direccion": "Club de Tango. Calle Suárez de Figueroa # 113, entre Velasco e Independencia",
+    "lat": -17.785840485031475,
+    "lng": -63.18252544110449,
+    "area": "Otro",
+    "responsable": "Sandra Gallardo",
+    "whatsapp": "60253890",
+    "redes": {
+      "facebook": "https://www.facebook.com/profile.php?id=100063615247660"
+    },
+    "descripcion": "La Asociación Boliviana de Artistas Plásticos de Santa Cruz (ABAP SCZ) se fundó el 14 de octubre de 1961 y tiene 11 filiales. Tiene como finalidad impulsar, coadyuvar, incentivar al desarrollo y a la difusión del arte plástico.",
+    "inicio_actividades": "17:00",
+    "fin_actividades": "23:00",
+    "num_actividades": 1,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/asociacion-boliviana-de-artistas-plasticos-abap-AH38P8L5YI.jpg",
+    "actividades": [
+      {
+        "nombre": "Exposición: Pintura y Arte Visual.",
+        "inicio": "17:00",
+        "fin": "23:00"
+      }
+    ]
+  },
+  {
+    "id": "asociacion-cultural-nueva-acropolis",
+    "nombre": "Asociación Cultural Nueva Acrópolis",
+    "direccion": "Calle Potosí # 462, entre Manuel Ignacio Salvatierra y Republiquetas",
+    "lat": -17.78731219475227,
+    "lng": -63.17657779320254,
+    "area": "Centro Cultural",
+    "responsable": "Carla Politi",
+    "whatsapp": "77392596",
+    "redes": {
+      "facebook": "https://www.facebook.com/NuevaAcropolisSantaCruz",
+      "instagram": "https://www.instagram.com/nuevaacropolissantacruz"
+    },
+    "descripcion": "Nueva Acrópolis es una escuela de filosofía, a la manera clásica, que promueve el desarrollo y la mejora del ser humano y de su entorno, a través de una educación integral, basada en la filosofía, la cultura y el voluntariado.",
+    "inicio_actividades": "17:00",
+    "fin_actividades": "22:45",
+    "num_actividades": 10,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/asociacion-cultural-nueva-acropolis-P6Q96E0M8T.jpg",
+    "actividades": [
+      {
+        "nombre": "Exposición de Trajes Internacionales.",
+        "inicio": "16:15",
+        "fin": "23:00"
+      },
+      {
+        "nombre": "Charla: La Tierra Viva: Una Mirada desde Gaia.",
+        "inicio": "19:45",
+        "fin": "20:30"
+      },
+      {
+        "nombre": "Charla: Los 7 Planos del Ser Humano, según la sabiduría de Oriente.",
+        "inicio": "20:45",
+        "fin": "21:30"
+      },
+      {
+        "nombre": "Charla: El Nosotros Biológico: una relectura de la identidad desde Lynn Margulis.",
+        "inicio": "21:45",
+        "fin": "22:30"
+      }
+    ]
+  },
+  {
+    "id": "museo-del-bicentenario-ana-barba",
+    "nombre": "Asociación de Mujeres Ana Barba",
+    "direccion": "Manzana Uno, Brigada Parlamentaria Cruceña (oficina Museo Bicentenario)",
+    "lat": -17.783990087255408,
+    "lng": -63.182096183724504,
+    "area": "Museo",
+    "responsable": "Melvy Chávez Castro",
+    "whatsapp": "77397500",
+    "redes": {
+      "facebook": "https://www.facebook.com/profile.php?id=100082315317511",
+      "instagram": "https://www.instagram.com/anabarbamovimiento"
+    },
+    "descripcion": "Asociación de Mujeres Ana Barba.",
+    "inicio_actividades": "17:00",
+    "fin_actividades": "22:30",
+    "num_actividades": 4,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/museo-del-bicentenario-ana-barba-B04NQIS10Y.jpg",
+    "actividades": [
+      {
+        "nombre": "Disertación de historia y firma de libros.",
+        "inicio": "18:00",
+        "fin": "22:30"
+      },
+      {
+        "nombre": "Disertación de historia y firma de libros con el escritor Nino Gandarilla.",
+        "inicio": "20:00",
+        "fin": "22:30"
+      }
+    ]
+  },
+  {
+    "id": "asociacion-pro-arte-y-cultura-apac",
+    "nombre": "Asociación Pro Arte y Cultura, APAC",
+    "direccion": "Calle Independencia # 568",
+    "lat": -17.78978,
+    "lng": -63.181794,
+    "area": "Otro",
+    "responsable": "Percy Áñez",
+    "whatsapp": "78116658",
+    "redes": {
+      "facebook": "https://www.facebook.com/apacfestivales",
+      "instagram": "https://www.instagram.com/festivalesapac"
+    },
+    "descripcion": "La Asociación Pro Arte y Cultura (APAC) es una organización de gestión cultural sin fines de lucro que, desde 1998, realiza una labor de democratización y dinamización del acceso a la formación artística.",
+    "inicio_actividades": "18:00",
+    "fin_actividades": "23:00",
+    "num_actividades": 1,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/asociacion-pro-arte-y-cultura-apac-OHFUI2S4GC.jpg",
+    "actividades": [
+      {
+        "nombre": "Exposición Permanente.",
+        "inicio": "18:00",
+        "fin": "23:00"
+      }
+    ]
+  },
+  {
+    "id": "caja-de-pandora-art",
+    "nombre": "Atelier Caja de Pandora Art",
+    "direccion": "Calle Libertad, entre Andrés Ibáñez y av. Cañoto",
+    "lat": -17.7761876,
+    "lng": -63.183167,
+    "area": "Centro Cultural",
+    "responsable": "Phacsy Aymara Calani",
+    "whatsapp": "76198793",
+    "redes": {
+      "facebook": "https://www.facebook.com/cajadepandora.art.7"
+    },
+    "descripcion": "Atelier Caja de Pandora Art tiene como principal función la exposición de obras en las distintas ramas de las artes plásticas. También brinda cursos especializados. Fue fundado en 2024.",
+    "inicio_actividades": "14:00",
+    "fin_actividades": "21:30",
+    "num_actividades": 1,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/caja-de-pandora-art-TXL8PVKZ3A.jpg",
+    "actividades": [
+      {
+        "nombre": "Exposición pictórica en las especialidades de óleo sobre lienzo, acuarela y dibujo al carboncillo.",
+        "inicio": "14:00",
+        "fin": "21:30"
+      }
+    ]
+  },
+  {
+    "id": "biblioteca-cba",
+    "nombre": "Biblioteca Dr. Percy Boland Rodríguez, CBA",
+    "direccion": "Calle Sucre # 346, entre Potosí y Cochabamba",
+    "lat": -17.78358382237257,
+    "lng": -63.1777994969945,
+    "area": "Centro Cultural",
+    "responsable": "Geovanna Muñoz",
+    "whatsapp": "77823740",
+    "redes": {
+      "facebook": "https://www.facebook.com/bibliotechnaCBA"
+    },
+    "descripcion": "La Biblioteca Dr. Percy Boland Rodríguez del Centro Boliviano Americano (CBA) es un centro de uso público moderno e interactivo, que cuenta con más de 7.000 libros.",
+    "inicio_actividades": "17:00",
+    "fin_actividades": "21:30",
+    "num_actividades": 1,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/biblioteca-cba-302MZJZ6I4.jpg",
+    "actividades": [
+      {
+        "nombre": "Exposición colectiva de Arte Contemporáneo.",
+        "inicio": "17:00",
+        "fin": "22:00"
+      }
+    ]
+  },
+  {
+    "id": "biblioteca-municipal-enrique-kempff-mercado",
+    "nombre": "Biblioteca Municipal Enrique Kempff Mercado",
+    "direccion": "Plazuela del Estudiante (calle Asunción, esq. Libertad)",
+    "lat": -17.774199,
+    "lng": -63.183162,
+    "area": "Biblioteca",
+    "responsable": "Biyú Suárez",
+    "whatsapp": "77620734",
+    "redes": {
+      "facebook": "https://www.facebook.com/bibliotecamunicipalscz"
+    },
+    "descripcion": "La Biblioteca Municipal Enrique Kempff Mercado funciona desde hace más de 40 años y está ubicada en la plazuela del Estudiante. Es el principal centro de lectura de la ciudad.",
+    "inicio_actividades": "17:15",
+    "fin_actividades": "22:00",
+    "num_actividades": 1,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/biblioteca-municipal-enrique-kempff-mercado-LE40KXF8LQ.jpg",
+    "actividades": [
+      {
+        "nombre": "Acto de apertura.",
+        "inicio": "17:15",
+        "fin": "22:00"
+      }
+    ]
+  },
+  {
+    "id": "centro-cultural-biblioteca-alto-san-pedro",
+    "nombre": "Biblioteca y Centro Cultural Alto San Pedro",
+    "direccion": "Radial 15, diagonal a la iglesia de San Pedro (tercer anillo interno)",
+    "lat": -17.811262276356693,
+    "lng": -63.19053209832764,
+    "area": "Centro Cultural",
+    "responsable": "Raúl Panozo",
+    "whatsapp": "77072136",
+    "redes": {
+      "facebook": "https://www.facebook.com/CulturaTurismoSCZ",
+      "instagram": "https://www.instagram.com/culturaturismoscz"
+    },
+    "descripcion": "La Biblioteca y el Centro Cultural Alto San Pedro forman parte de la Red Municipal de Bibliotecas y Centros Culturales. Se ubica en la zona homónima del distrito 4.",
+    "inicio_actividades": "14:00",
+    "fin_actividades": "20:30",
+    "num_actividades": 7,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/centro-cultural-biblioteca-alto-san-pedro-U7XBZWQ5AJ.jpg",
+    "actividades": [
+      {
+        "nombre": "Campeonato Infantil de Fútbol.",
+        "inicio": "14:00",
+        "fin": "15:00"
+      },
+      {
+        "nombre": "Juegos Populares.",
+        "inicio": "15:30",
+        "fin": "16:30"
+      },
+      {
+        "nombre": "Campeonato de Ajedrez.",
+        "inicio": "16:00",
+        "fin": "18:00"
+      },
+      {
+        "nombre": "Entrega de certificados de los estudiantes del Taller de Artes.",
+        "inicio": "19:30",
+        "fin": "20:00"
+      },
+      {
+        "nombre": "Proyección de Videos de Historia.",
+        "inicio": "20:00",
+        "fin": "20:15"
+      }
+    ]
+  },
+  {
+    "id": "centro-cultural-guaracal-la-morita",
+    "nombre": "Biblioteca y Centro Cultural Guaracal - La Morita",
+    "direccion": "Barrio La Morita, calle Augusto Zambrana Terán, entre avenida Santos Dumont y radial 13",
+    "lat": -17.816308,
+    "lng": -63.180357,
+    "area": "Centro Cultural",
+    "responsable": "Eduardo Quiller",
+    "whatsapp": "73136011",
+    "redes": {
+      "facebook": "https://www.facebook.com/CulturaTurismoSCZ",
+      "instagram": "https://www.instagram.com/culturaturismoscz"
+    },
+    "descripcion": "La Biblioteca y el Centro Cultural Guaracal - La Morita se ubican en la zona sur de la ciudad capital y es uno de los primeros espacios creados por la Alcaldía.",
+    "inicio_actividades": "16:00",
+    "fin_actividades": "22:00",
+    "num_actividades": 1,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/centro-cultural-guaracal-la-morita-3LNZ8TO91Y.jpg",
+    "actividades": [
+      {
+        "nombre": "Exposición de libros, pintura y performance de la BiblioBici.",
+        "inicio": "16:00",
+        "fin": "22:00"
+      }
+    ]
+  },
+  {
+    "id": "centro-cultural-la-cuchilla",
+    "nombre": "Biblioteca y Centro Cultural La Cuchilla",
+    "direccion": "Barrio La Cuchilla, avenida Vallegrande, entre La Colina y Hugo Barranco",
+    "lat": -17.818015,
+    "lng": -63.202829,
+    "area": "Biblioteca",
+    "responsable": "Wálter Vaca",
+    "whatsapp": "68838720",
+    "redes": {
+      "facebook": "https://www.facebook.com/CulturaTurismoSCZ",
+      "instagram": "https://www.instagram.com/culturaturismoscz"
+    },
+    "descripcion": "La Biblioteca y el Centro Cultural La Cuchilla se ubican en la zona sur de la ciudad capital. Cuenta con una biblioteca local, escenario y otros espacios para el uso de los vecinos.",
+    "inicio_actividades": "16:00",
+    "fin_actividades": "23:00",
+    "num_actividades": 6,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/centro-cultural-la-cuchilla-I9MPYAK1BV.jpg",
+    "actividades": [
+      {
+        "nombre": "Mural Interactivo (Un Mundo Dividido).",
+        "inicio": "16:00",
+        "fin": "18:30"
+      },
+      {
+        "nombre": "Ilustración Digital en (Galería de Exposición).",
+        "inicio": "16:00",
+        "fin": "23:00"
+      },
+      {
+        "nombre": "Sala Exposición de Dibujo y Pintura.",
+        "inicio": "16:00",
+        "fin": "23:00"
+      }
+    ]
+  },
+  {
+    "id": "bizantina",
+    "nombre": "Bizantina",
+    "direccion": "Calle Lemoine # 140, entre Independencia y Velasco",
+    "lat": -17.7902305,
+    "lng": -63.1821598,
+    "area": "Otro",
+    "responsable": "María Belén Riveros Pino",
+    "whatsapp": "79796708",
+    "redes": {},
+    "descripcion": "Bizantina Sabor y Arte es un acogedor espacio cultural que fusiona delicias culinarias con el mundo artístico.",
+    "inicio_actividades": "17:30",
+    "fin_actividades": "23:00",
+    "num_actividades": 1,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/bizantina-8CZ5EW5QE6.jpg",
+    "actividades": [
+      {
+        "nombre": "Apertura y visita guiada.",
+        "inicio": "17:30",
+        "fin": "23:00"
+      }
+    ]
+  },
+  {
+    "id": "fundacion-cultural-benjamin-capital-de-ideas-bob-studio",
+    "nombre": "Bob Studio",
+    "direccion": "Plaza del Libro. Barrio Equipetrol, avenida San Martín, calle Pablo Sanz",
+    "lat": -17.762188,
+    "lng": -63.195838,
+    "area": "Otro",
+    "responsable": "Bob Studio",
+    "whatsapp": "77882272",
+    "redes": {
+      "instagram": "https://www.instagram.com/@bobstudioworks"
+    },
+    "descripcion": "Es un estudio multidisciplinario de diseño y cerámica ubicado en pleno centro de Santa Cruz de la Sierra. Se dedica principalmente al diseño y creación de objetos cerámicos.",
+    "inicio_actividades": "18:00",
+    "fin_actividades": "22:00",
+    "num_actividades": 1,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/fundacion-cultural-benjamin-capital-de-ideas-bob-studio-YFIKDCV5L9.jpg",
+    "actividades": [
+      {
+        "nombre": "Sesión de Cerámica Libre (torno y modelado a mano).",
+        "inicio": "18:00",
+        "fin": "22:00"
+      }
+    ]
+  },
+  {
+    "id": "bonobo-slackline",
+    "nombre": "Bonobo Slackline",
+    "direccion": "Plazuela Italia, al frente del Edificio Macororó 12 (entre avenidas Busch y San Martín)",
+    "lat": -17.767947,
+    "lng": -63.199067,
+    "area": "Otro",
+    "responsable": "Cecilia Ramírez",
+    "whatsapp": "78758269",
+    "redes": {
+      "instagram": "https://www.instagram.com/bonoboslacklinesc"
+    },
+    "descripcion": "Bonobo Slackline Santa Cruz es un espacio creado para hacer deporte al aire libre. Se practica y se enseña el arte del equilibrio sobre una cinta floja.",
+    "inicio_actividades": "17:00",
+    "fin_actividades": "22:00",
+    "num_actividades": 1,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/bonobo-slackline-TT6R83E6B3.jpg",
+    "actividades": []
+  },
+  {
+    "id": "libreria-y-cafe-san-pablo",
+    "nombre": "Café & Librería San Pablo",
+    "direccion": "Calle Bolívar, esq. Beni",
+    "lat": -17.782748,
+    "lng": -63.180618,
+    "area": "Librería",
+    "responsable": "Raisa Álvarez",
+    "whatsapp": "79055404",
+    "redes": {
+      "facebook": "https://www.facebook.com/SanPabloLibreria"
+    },
+    "descripcion": "Café & Librería San Pablo fue creada en 1982. Se encuentra ubicada en una céntrica calle de Santa Cruz de la Sierra, a una cuadra de la plaza 24 de Septiembre.",
+    "inicio_actividades": "20:00",
+    "fin_actividades": "21:30",
+    "num_actividades": 2,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/libreria-y-cafe-san-pablo-WEL0V90HPQ.jpg",
+    "actividades": [
+      {
+        "nombre": "Presentación Musical.",
+        "inicio": "20:00",
+        "fin": "22:00"
+      },
+      {
+        "nombre": "Presentación: Arte y Juventud Chiquitana.",
+        "inicio": "20:00",
+        "fin": "22:00"
+      }
+    ]
+  },
+  {
+    "id": "caffettino",
+    "nombre": "Caffettino",
+    "direccion": "Calle Chuquisaca # 16",
+    "lat": -17.7839582,
+    "lng": -63.1803312,
+    "area": "Cafetería",
+    "responsable": "Michelle Siles Cuéllar",
+    "whatsapp": "76813614",
+    "redes": {
+      "instagram": "https://www.instagram.com/caffettino.bo"
+    },
+    "descripcion": "Caffettino es una cafetería muy acogedora, con un menú variado, que expone bebidas frías y calientes, así como snacks dulces, salados y saludables.",
+    "inicio_actividades": "10:00",
+    "fin_actividades": "23:00",
+    "num_actividades": 1,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/caffettino-3PPYUL1O7X.jpg",
+    "actividades": [
+      {
+        "nombre": "Caffettino - Actividad cultural.",
+        "inicio": "10:00",
+        "fin": "23:00"
+      }
+    ]
+  },
+  {
+    "id": "callejxn-cafe",
+    "nombre": "Callejxn Café",
+    "direccion": "Barrio Equipetrol Norte, avenida San Martín, calle A, Pablo Sanz # 22 (entre tercer y cuarto anillo)",
+    "lat": -17.762188,
+    "lng": -63.195838,
+    "area": "Cafetería",
+    "responsable": "Sarita Mansilla",
+    "whatsapp": "76028390",
+    "redes": {
+      "facebook": "https://www.facebook.com/profile.php?id=100086628466453",
+      "instagram": "https://www.instagram.com/callejxn.cafe"
+    },
+    "descripcion": "Creemos en lo no evidente. Un espacio donde detenerse y sorprenderse por lo olvidado y lo rutinario.",
+    "inicio_actividades": "17:00",
+    "fin_actividades": "22:00",
+    "num_actividades": 1,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/callejxn-cafe-UYG82BMVXK.jpg",
+    "actividades": [
+      {
+        "nombre": "Exposición de Arte y Pinturas.",
+        "inicio": "17:00",
+        "fin": "22:00"
+      }
+    ]
+  },
+  {
+    "id": "camara-del-libro",
+    "nombre": "Cámara Departamental del Libro de Santa Cruz, CDLSC",
+    "direccion": "Calle René Moreno # 369",
+    "lat": -17.787269811780863,
+    "lng": -63.18118286076929,
+    "area": "Centro Cultural",
+    "responsable": "Melissa Pereyra",
+    "whatsapp": "77627617",
+    "redes": {
+      "facebook": "https://www.facebook.com/profile.php?id=100079687869125",
+      "instagram": "https://www.instagram.com/feriadellibro.santacruz"
+    },
+    "descripcion": "La Cámara Departamental del Libro de Santa Cruz (CDLSC) es una asociación gremial, sin fines de lucro, que reúne a todos aquellos que están inmersos en el mundo de los libros en el departamento de Santa Cruz.",
+    "inicio_actividades": "18:00",
+    "fin_actividades": "22:00",
+    "num_actividades": 1,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/camara-del-libro-4U2L09AWAB.jpg",
+    "actividades": [
+      {
+        "nombre": "Exposición: La Danza de las Flores.",
+        "inicio": "17:00",
+        "fin": "23:00"
+      },
+      {
+        "nombre": "Rueda de intercambio y conversación.",
+        "inicio": "18:00",
+        "fin": "22:00"
+      }
+    ]
+  },
+  {
+    "id": "casa-herminio-pedraza",
+    "nombre": "Casa Herminio Pedraza",
+    "direccion": "Villa Mercedes, radial 19, calle 4 (Okinawa) # 3.115",
+    "lat": -17.789128722321195,
+    "lng": -63.209764619130716,
+    "area": "Centro Cultural",
+    "responsable": "Sarah Pedraza y Denisse Reyes",
+    "whatsapp": "70975473",
+    "redes": {
+      "instagram": "https://www.instagram.com/casaherminiopedraza.oficial/"
+    },
+    "descripcion": "La Casa Herminio Pedraza tiene cinco décadas de existencia y le pertenecía al emblemático artista cruceño del mismo nombre. En 2025 se ha convertido en un espacio alternativo para que otros artistas expongan.",
+    "inicio_actividades": "16:00",
+    "fin_actividades": "22:30",
+    "num_actividades": 8,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/casa-herminio-pedraza-L7M4065J3P.jpg",
+    "actividades": [
+      {
+        "nombre": "Presentación: Orquesta Infantil de la Fundación Niño Feliz.",
+        "inicio": "20:00",
+        "fin": "20:15"
+      },
+      {
+        "nombre": "Presentación: Ballet Juventud Puenteña.",
+        "inicio": "20:15",
+        "fin": "20:30"
+      },
+      {
+        "nombre": "Presentación: Orquesta Sinfónica de la Fundación Niño Feliz.",
+        "inicio": "20:45",
+        "fin": "21:30"
+      },
+      {
+        "nombre": "Presentación: Orquesta Estudiantina de la Fundación Niño Feliz.",
+        "inicio": "21:30",
+        "fin": "21:45"
+      },
+      {
+        "nombre": "Presentación: Alice Montenegro (cantante), Orquesta Estudiantina y Ballet Juventud Puenteña.",
+        "inicio": "21:45",
+        "fin": "22:30"
+      }
+    ]
+  },
+  {
+    "id": "casa-melchor-pinto",
+    "nombre": "Casa Melchor Pinto",
+    "direccion": "Calle Sucre # 50, entre René Moreno y Chuquisaca",
+    "lat": -17.783805,
+    "lng": -63.180976,
+    "area": "Centro Cultural",
+    "responsable": "Analía Villarroel",
+    "whatsapp": "70934620",
+    "redes": {
+      "facebook": "https://www.facebook.com/CasaMelchorPinto",
+      "instagram": "https://www.instagram.com/casamelchorpinto"
+    },
+    "descripcion": "La Casa Melchor Pinto (CMP) es un centro cultural articulador de las diversas artes, que promueve la identidad y la cultura en la capital cruceña desde sus diferentes expresiones.",
+    "inicio_actividades": "18:00",
+    "fin_actividades": "23:00",
+    "num_actividades": 6,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/casa-melchor-pinto-LKF6RDWCBU.jpg",
+    "actividades": [
+      {
+        "nombre": "El Miauseo, Galería de Arte Gatuno Contemporáneo.",
+        "inicio": "16:00",
+        "fin": "21:00"
+      },
+      {
+        "nombre": "Exposición permanente.",
+        "inicio": "18:00",
+        "fin": "23:00"
+      }
+    ]
+  },
+  {
+    "id": "casa-municipal-de-la-cultura-raul-otero-reiche",
+    "nombre": "Casa Municipal de la Cultura Raúl Otero Reiche",
+    "direccion": "Plaza de Armas 24 de Septiembre, acera oeste (calle Libertad)",
+    "lat": -17.783253,
+    "lng": -63.182689,
+    "area": "Galería",
+    "responsable": "Álex Frías",
+    "whatsapp": "72676595",
+    "redes": {
+      "facebook": "https://www.facebook.com/CulturaTurismoSCZ",
+      "instagram": "https://www.instagram.com/culturaturismoscz"
+    },
+    "descripcion": "La Casa Municipal de la Cultura Raúl Otero Reiche lleva más de 50 años como una institución dedicada a la difusión de las expresiones artísticas. Es el mayor centro de las artes de Santa Cruz de la Sierra.",
+    "inicio_actividades": "16:00",
+    "fin_actividades": "00:00",
+    "num_actividades": 3,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/casa-municipal-de-la-cultura-raul-otero-reiche-E16L8KWGU1.jpg",
+    "actividades": [
+      {
+        "nombre": "Exposición Temporal: El Lenguaje de las Estrellas.",
+        "inicio": "16:00",
+        "fin": "00:00"
+      },
+      {
+        "nombre": "Exposición Permanente: Susurros Libertarios, 200 Años Siempre Libres.",
+        "inicio": "16:00",
+        "fin": "00:00"
+      },
+      {
+        "nombre": "Exposición Permanente: La Casa y su Legado, un Río de Pie.",
+        "inicio": "16:00",
+        "fin": "00:00"
+      }
+    ]
+  },
+  {
+    "id": "gaia-coffee-bar",
+    "nombre": "Catllejera Bolivia",
+    "direccion": "Casa Melchor Pinto, calle Sucre # 50",
+    "lat": -17.78377313384584,
+    "lng": -63.18098155967035,
+    "area": "Galería",
+    "responsable": "Karina Llusco",
+    "whatsapp": "75590169",
+    "redes": {
+      "facebook": "https://www.facebook.com/CatllejeraBolivia",
+      "instagram": "https://www.instagram.com/cat_llejera"
+    },
+    "descripcion": "Catllejera Bolivia es un proyecto artístico, cultural y comercial que surgió en 2024 debido al amor por los gatos y el deseo de darles voz a través del arte, el diseño y la comunidad.",
+    "inicio_actividades": "16:00",
+    "fin_actividades": "23:00",
+    "num_actividades": 4,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/gaia-coffee-bar-DR9Q1Z9L44.jpg",
+    "actividades": []
+  },
+  {
+    "id": "centro-boliviano-americano",
+    "nombre": "Centro Boliviano Americano, CBA",
+    "direccion": "Calle Sucre # 364",
+    "lat": -17.783501391168166,
+    "lng": -63.177621242620305,
+    "area": "Centro Educativo",
+    "responsable": "Geovana Muñoz",
+    "whatsapp": "77823740",
+    "redes": {
+      "facebook": "https://www.facebook.com/CentroCulturalCBA",
+      "instagram": "https://www.instagram.com/cba_cultura/"
+    },
+    "descripcion": "El Centro Boliviano Americano de Santa Cruz de la Sierra tiene más de 60 años de funcionamiento y es el centro de enseñanza de inglés más importante de Bolivia.",
+    "inicio_actividades": "17:00",
+    "fin_actividades": "21:00",
+    "num_actividades": 3,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/centro-boliviano-americano-QM6I81YJ6R.jpg",
+    "actividades": [
+      {
+        "nombre": "American Spaces (información de distintos programas).",
+        "inicio": "16:00",
+        "fin": "21:00"
+      },
+      {
+        "nombre": "Pasarela de Constelaciones (observación de cielo y uso de telescopio).",
+        "inicio": "16:00",
+        "fin": "21:00"
+      },
+      {
+        "nombre": "Open Day de Cultura (dinámicas, actividades científicas).",
+        "inicio": "16:00",
+        "fin": "21:00"
+      }
+    ]
+  },
+  {
+    "id": "centro-cultural-feliciana-rodriguez",
+    "nombre": "Centro Cultural Feliciana Rodríguez",
+    "direccion": "Calle Ñuflo de Chávez # 21, entre René Moreno y Chuquisaca",
+    "lat": -17.7858218277417,
+    "lng": -63.181017570591834,
+    "area": "Centro Cultural",
+    "responsable": "Lourdes Montero Valverde",
+    "whatsapp": "72609388",
+    "redes": {
+      "facebook": "https://www.facebook.com/CulturalFelicianaRodriguez",
+      "instagram": "https://www.instagram.com/ccfelicianarodriguez"
+    },
+    "descripcion": "Centro cultural que desde 2001 ofrece acceso a la cultura y formación en las artes para entender mejor la vida y las relaciones humanas.",
+    "inicio_actividades": "16:00",
+    "fin_actividades": "23:00",
+    "num_actividades": 9,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/centro-cultural-feliciana-rodriguez-B53P38UT1P.jpg",
+    "actividades": [
+      {
+        "nombre": "Bicu Bicu Fest - Feria de Coleccionistas.",
+        "inicio": "16:00",
+        "fin": "23:00"
+      },
+      {
+        "nombre": "Instalación artística entre Luz y Tradición (pintura).",
+        "inicio": "16:00",
+        "fin": "23:00"
+      },
+      {
+        "nombre": "Colegio La Misión de Jesús: Canto y Danza.",
+        "inicio": "16:00",
+        "fin": "16:45"
+      },
+      {
+        "nombre": "Exposición de cuadros - Estudiantes de la Carrera de Arte.",
+        "inicio": "16:00",
+        "fin": "23:00"
+      },
+      {
+        "nombre": "Feria de la Cámara de Ilustradores - artistas independientes.",
+        "inicio": "16:00",
+        "fin": "23:00"
+      },
+      {
+        "nombre": "Orquesta Sinfónica Hombres Nuevos.",
+        "inicio": "20:00",
+        "fin": "21:00"
+      },
+      {
+        "nombre": "Exhibición artística de Escuelas de Baile - Salsa y Bachata.",
+        "inicio": "21:30",
+        "fin": "22:30"
+      }
+    ]
+  },
+  {
+    "id": "centro-cultural-ronald-roa",
+    "nombre": "Centro Cultural Ronald Roa",
+    "direccion": "Barrio Máquina Vieja, calle Acre # 168, entre Carmelo López y Carmelo Llanos",
+    "lat": -17.772176,
+    "lng": -63.176988,
+    "area": "Centro Cultural",
+    "responsable": "Gabriela Roa Velasco",
+    "whatsapp": "70407220",
+    "redes": {
+      "facebook": "https://www.facebook.com/RonaldRoaCentroCultural",
+      "instagram": "https://www.instagram.com/ronaldroa.centrocultural"
+    },
+    "descripcion": "El Centro Cultural Ronald Roa es una institución privada y familiar creada el 18 de agosto de 2010. Se encarga de difundir la obra de Ronald Roa y promover el arte y la cultura en Santa Cruz.",
+    "inicio_actividades": "18:00",
+    "fin_actividades": "22:30",
+    "num_actividades": 4,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/centro-cultural-ronald-roa-8PRQ9KHD5S.jpg",
+    "actividades": [
+      {
+        "nombre": "Exposición Colectiva de Arte.",
+        "inicio": "17:00",
+        "fin": "23:00"
+      },
+      {
+        "nombre": "Fotografía urbana.",
+        "inicio": "18:00",
+        "fin": "23:00"
+      },
+      {
+        "nombre": "Exposición y actividades.",
+        "inicio": "18:00",
+        "fin": "22:30"
+      }
+    ]
+  },
+  {
+    "id": "andira-flora-sin-limites",
+    "nombre": "Centro de Divulgación de la Flora Cruceña Andira, Flora Sin Límites",
+    "direccion": "Calle Ballivián # 66 (interior de La Federal Espacio Colaborativo)",
+    "lat": -17.78481512234479,
+    "lng": -63.18093794138083,
+    "area": "Otro",
+    "responsable": "Alejandro Alcibiades Angulo",
+    "whatsapp": "63535217",
+    "redes": {
+      "facebook": "https://www.facebook.com/AndiraFloraSinLimites",
+      "instagram": "https://www.instagram.com/andira_florasinlimites"
+    },
+    "descripcion": "Andira, Flora sin límites es el primer centro dedicado a la divulgación de la flora cruceña. Actúa como un puente entre las plantas y su gente.",
+    "inicio_actividades": "15:15",
+    "fin_actividades": "21:00",
+    "num_actividades": 1,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/andira-flora-sin-limites-3JRWV52CX6.jpg",
+    "actividades": [
+      {
+        "nombre": "Emparentados. Descubre cómo algunas plantas típicas de Santa Cruz comparten un parentesco evolutivo.",
+        "inicio": "15:30",
+        "fin": "21:00"
+      }
+    ]
+  },
+  {
+    "id": "centro-de-la-cooperacion-espanola-aecid",
+    "nombre": "Centro de Formación de la Cooperación Española en Santa Cruz de la Sierra, AECID",
+    "direccion": "Calle Arenales # 583",
+    "lat": -17.78093349000904,
+    "lng": -63.17545269216305,
+    "area": "Otro",
+    "responsable": "Paola Ríos Ahenke",
+    "whatsapp": "76076831",
+    "redes": {
+      "facebook": "https://www.facebook.com/CFCESantaCruzAecid",
+      "instagram": "https://www.instagram.com/cfce.santacruz.bo"
+    },
+    "descripcion": "El Centro de Formación de la Cooperación Española AECID es una unidad especializada en gestión del conocimiento para el desarrollo. Cuenta con un salón múltiple, una sala de teatro, una biblioteca y un área al aire libre.",
+    "inicio_actividades": "15:30",
+    "fin_actividades": "22:00",
+    "num_actividades": 3,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/centro-de-la-cooperacion-espanola-aecid-YRR914A5N1.jpg",
+    "actividades": [
+      {
+        "nombre": "Exposición: Etseasa Medi - Nuestra Tierra.",
+        "inicio": "15:30",
+        "fin": "22:00"
+      },
+      {
+        "nombre": "Visita Guiada - Exposición: Etseasa Medi - Nuestra Tierra.",
+        "inicio": "16:00",
+        "fin": "16:30"
+      },
+      {
+        "nombre": "Muestra de Cine Europeo Eurocine: Gloria.",
+        "inicio": "19:30",
+        "fin": "21:15"
+      }
+    ]
+  },
+  {
+    "id": "centro-de-la-cultura-plurinacional",
+    "nombre": "Centro de la Cultura Plurinacional Santa Cruz (CCP)",
+    "direccion": "Calle René Moreno # 369",
+    "lat": -17.787446,
+    "lng": -63.181235,
+    "area": "Centro Cultural",
+    "responsable": "Priscila Torrico Figueroa",
+    "whatsapp": "60946569",
+    "redes": {
+      "facebook": "https://www.facebook.com/CCPSCZ",
+      "instagram": "https://www.instagram.com/ccpscz"
+    },
+    "descripcion": "El Centro de la Cultura Plurinacional Santa Cruz (CCP) es una institución dependiente de la Fundación Cultural del Banco Central de Bolivia. Tiene como objeto promocionar, proteger y poner en valor la cultura plurinacional.",
+    "inicio_actividades": "18:00",
+    "fin_actividades": "22:00",
+    "num_actividades": 9,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/centro-de-la-cultura-plurinacional-B1OOYP51YJ.jpg",
+    "actividades": [
+      {
+        "nombre": "Exposición Permanente.",
+        "inicio": "17:00",
+        "fin": "21:00"
+      },
+      {
+        "nombre": "Exposición de Arte Contemporáneo.",
+        "inicio": "18:00",
+        "fin": "22:00"
+      },
+      {
+        "nombre": "Música en Vivo (bandas y cantantes culturales emergentes).",
+        "inicio": "20:00",
+        "fin": "22:00"
+      }
+    ]
+  },
+  {
+    "id": "centro-the-move-sin-limites",
+    "nombre": "Centro The Move Sin Límite",
+    "direccion": "Avenida Viedma # 358, entre Warnes y Monseñor Salvatierra (primer anillo)",
+    "lat": -17.786162878600756,
+    "lng": -63.171990747752545,
+    "area": "Centro Cultural",
+    "responsable": "Reina Bernal Laura",
+    "whatsapp": "76308234",
+    "redes": {
+      "facebook": "https://www.facebook.com/Themovesinlimite",
+      "instagram": "https://www.instagram.com/themovebol"
+    },
+    "descripcion": "El Centro The Move Sin Límite es un espacio de relajación corporal donde se brindan clases de yoga, meditación, respiración, tai chi y danza.",
+    "inicio_actividades": "16:00",
+    "fin_actividades": "23:00",
+    "num_actividades": 7,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/centro-the-move-sin-limites-FJ9LG9JP4V.jpg",
+    "actividades": [
+      {
+        "nombre": "Breve explicación sobre el Centro The Move.",
+        "inicio": "16:00",
+        "fin": "16:30"
+      },
+      {
+        "nombre": "Clase de Yoga.",
+        "inicio": "18:00",
+        "fin": "19:00"
+      },
+      {
+        "nombre": "Presentación: danzas árabes e hindúes y tai chi.",
+        "inicio": "20:00",
+        "fin": "20:30"
+      },
+      {
+        "nombre": "Expresión cultural en movimiento: Bolivia, danzas de la India, arte oriental y tai chi.",
+        "inicio": "21:00",
+        "fin": "21:30"
+      },
+      {
+        "nombre": "La fuerza y elegancia de la morenada en escena.",
+        "inicio": "22:00",
+        "fin": "22:30"
+      }
+    ]
+  },
+  {
+    "id": "cincuenta-cinquenta",
+    "nombre": "Cincuenta Cinquenta",
+    "direccion": "Calle Republiquetas, esq. Chuquisaca # 420",
+    "lat": -17.787767036643974,
+    "lng": -63.1799675017696,
+    "area": "Centro Cultural",
+    "responsable": "Favio Pérez",
+    "whatsapp": "74923334",
+    "redes": {
+      "instagram": "https://www.instagram.com/cincuentacinquenta/"
+    },
+    "descripcion": "Cincuenta Cinquenta es un centro cultural que combina gastronomía con las artes. Se ubica en pleno casco viejo cruceño.",
+    "inicio_actividades": "16:00",
+    "fin_actividades": "00:00",
+    "num_actividades": 4,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/cincuenta-cinquenta-711RU1X5MI.jpg",
+    "actividades": [
+      {
+        "nombre": "Momento Artístico de Ozzo Ukumari.",
+        "inicio": "16:00",
+        "fin": "23:00"
+      },
+      {
+        "nombre": "Muestra Artística de Renate Hollweg.",
+        "inicio": "16:00",
+        "fin": "23:00"
+      },
+      {
+        "nombre": "Rompecabezas (concierto en vivo).",
+        "inicio": "21:00",
+        "fin": "23:00"
+      }
+    ]
+  },
+  {
+    "id": "club-de-madres-emprendedoras-la-morita",
+    "nombre": "Club de Madres Emprendedoras La Morita",
+    "direccion": "Barrio La Morita, calle Augusto Zambrana Terán # 3.190, entre radial 13 y avenida Santos Dumont",
+    "lat": -17.816315634651556,
+    "lng": -63.18036061907088,
+    "area": "Otro",
+    "responsable": "Mercedes Gaby Mejía Solíz",
+    "whatsapp": "70987802",
+    "redes": {},
+    "descripcion": "El Club de Madres Emprendedoras La Morita es una institución sin fines de lucro conformada por más de 50 mujeres que realizan talleres de bisutería, pintura, tejido y otros oficios.",
+    "inicio_actividades": "16:00",
+    "fin_actividades": "22:30",
+    "num_actividades": 2,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/club-de-madres-emprendedoras-la-morita-XITC4LP9Z2.jpg",
+    "actividades": [
+      {
+        "nombre": "Presentación artística de Fernando Rojas.",
+        "inicio": "20:00",
+        "fin": "21:00"
+      }
+    ]
+  },
+  {
+    "id": "colors-coffe",
+    "nombre": "Colors Coffee",
+    "direccion": "Calle Ballivián # 66 (interior de La Federal Espacio Colaborativo)",
+    "lat": -17.78482,
+    "lng": -63.18092,
+    "area": "Cafetería",
+    "responsable": "Lorena Dorado",
+    "whatsapp": "71357476",
+    "redes": {
+      "facebook": "https://www.facebook.com/colorscoffeesc",
+      "instagram": "https://www.instagram.com/colorscoffeesc/"
+    },
+    "descripcion": "Colors Coffee es un co-work ubicado en el interior de La Federal Espacio Colaborativo sobre la calle Ballivián, casi Rene Moreno.",
+    "inicio_actividades": "16:00",
+    "fin_actividades": "22:00",
+    "num_actividades": 5,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/colors-coffe-DYLDWPD7BX.jpg",
+    "actividades": []
+  },
+  {
+    "id": "casa-cultural-gladys-moreno",
+    "nombre": "Doña Gladys",
+    "direccion": "Calle Murillo # 119, entre Arenales y Bolívar",
+    "lat": -17.782368240438473,
+    "lng": -63.17954894317472,
+    "area": "Centro Cultural",
+    "responsable": "Ana Gutiérrez",
+    "whatsapp": "69133847",
+    "redes": {
+      "instagram": "https://www.instagram.com/espacio.infinito.scz"
+    },
+    "descripcion": "Doña Gladys es un espacio independiente dedicado a la promoción y fomento de diversas expresiones artísticas, ubicado en la histórica exvivienda de la cantante boliviana Gladys Moreno.",
+    "inicio_actividades": "16:00",
+    "fin_actividades": "00:00",
+    "num_actividades": 4,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/casa-cultural-gladys-moreno-WZZNIJXZ54.jpg",
+    "actividades": [
+      {
+        "nombre": "Kachivateca - Mercado Creativo.",
+        "inicio": "16:00",
+        "fin": "21:30"
+      },
+      {
+        "nombre": "Instalación en la habitación de Gladys Moreno.",
+        "inicio": "16:00",
+        "fin": "21:30"
+      },
+      {
+        "nombre": "Exposición: Poesía Hecha Voz. Por: Carmenza.",
+        "inicio": "16:00",
+        "fin": "21:30"
+      }
+    ]
+  },
+  {
+    "id": "eclat-espacio-moda",
+    "nombre": "Edita Vojtková Espacio Moda",
+    "direccion": "Barrio Sirari. Avenida San Martín y calle Los Flamboyanes (tercer anillo externo)",
+    "lat": -17.764487,
+    "lng": -63.19889,
+    "area": "Centro Cultural",
+    "responsable": "Edita Vojtková",
+    "whatsapp": "70742691",
+    "redes": {
+      "facebook": "https://www.facebook.com/eclat.espacio.moda",
+      "instagram": "https://www.instagram.com/eclat_espacio_moda"
+    },
+    "descripcion": "Bajo la dirección de la diseñadora Edita Vojtková, este espacio nace con la visión de convertirse en un referente de diseño y creatividad en Bolivia.",
+    "inicio_actividades": "18:00",
+    "fin_actividades": "23:00",
+    "num_actividades": 2,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/eclat-espacio-moda-GQBIM1UWEZ.jpg",
+    "actividades": [
+      {
+        "nombre": "Exposición de Arte Urbano.",
+        "inicio": "18:00",
+        "fin": "23:00"
+      },
+      {
+        "nombre": "Paseo de Moda y Su Historia.",
+        "inicio": "20:00",
+        "fin": "21:00"
+      }
+    ]
+  },
+  {
+    "id": "el-aljibe-comida-tipica",
+    "nombre": "El Aljibe Comida Típica",
+    "direccion": "Calle Potosí # 201, esquina Ñuflo de Chávez",
+    "lat": -17.785341,
+    "lng": -63.177091,
+    "area": "Restaurante",
+    "responsable": "Javier Libera",
+    "whatsapp": "70288881",
+    "redes": {
+      "facebook": "https://www.facebook.com/elaljibe.comidatipica",
+      "instagram": "https://www.instagram.com/elaljibe"
+    },
+    "descripcion": "El Aljibe Comida Típica abrió sus puertas el 27 de enero de 2009. Esta vieja casa data de 1880. Ofrece un menú con platos típicos cruceños como majao, locro de gallina, pipián y otros.",
+    "inicio_actividades": "18:00",
+    "fin_actividades": "22:30",
+    "num_actividades": 1,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/el-aljibe-comida-tipica-2LN20MRPHZ.jpg",
+    "actividades": [
+      {
+        "nombre": "Presentación artística y exhibición.",
+        "inicio": "18:00",
+        "fin": "22:30"
+      }
+    ]
+  },
+  {
+    "id": "espacio-enfoque",
+    "nombre": "Espacio Enfoque",
+    "direccion": "Zona Norte, El Remanso, octavo anillo (Colegio San Marcos)",
+    "lat": -17.71506121178944,
+    "lng": -63.171615817670755,
+    "area": "Centro Educativo",
+    "responsable": "Catherine Meruvia",
+    "whatsapp": "76298878",
+    "redes": {
+      "facebook": "https://www.facebook.com/enfoqueespacio",
+      "instagram": "https://www.instagram.com/espacioenfoque.edu7/"
+    },
+    "descripcion": "Espacio Enfoque.",
+    "inicio_actividades": "16:30",
+    "fin_actividades": "21:30",
+    "num_actividades": 3,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/espacio-enfoque-LRWTVK7XPR.jpg",
+    "actividades": [
+      {
+        "nombre": "Actividades culturales y artísticas.",
+        "inicio": "16:30",
+        "fin": "21:30"
+      }
+    ]
+  },
+  {
+    "id": "espacio-infinito",
+    "nombre": "Espacio Infinito",
+    "direccion": "Calle Murillo # 119, entre Arenales y Bolívar (interior de Doña Gladys)",
+    "lat": -17.7823519,
+    "lng": -63.1795476,
+    "area": "Centro Cultural",
+    "responsable": "Ana Gutiérrez",
+    "whatsapp": "69133847",
+    "redes": {
+      "instagram": "https://www.instagram.com/espacio.infinito.scz"
+    },
+    "descripcion": "Espacio Infinito es un centro que fusiona comunidad, arte y gastronomía en proyectos en el corazón de la capital cruceña.",
+    "inicio_actividades": "16:00",
+    "fin_actividades": "00:00",
+    "num_actividades": 4,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/espacio-infinito-DRRTWVLIBE.jpg",
+    "actividades": [
+      {
+        "nombre": "Actividades artísticas.",
+        "inicio": "18:00",
+        "fin": "00:00"
+      }
+    ]
+  },
+  {
+    "id": "feria-de-coleccionistas-santa-cruz",
+    "nombre": "Feria de Coleccionistas Santa Cruz",
+    "direccion": "Calle Republiquetas # 484, entre Potosí y Tarija, al frente de la Cafetería El Orquideario",
+    "lat": -17.78655,
+    "lng": -63.175739,
+    "area": "Centro Comercial",
+    "responsable": "Teresa Rico Garrido",
+    "whatsapp": "76657733",
+    "redes": {
+      "facebook": "https://www.facebook.com/MonitosGeek"
+    },
+    "descripcion": "Es una tienda especializada en poleras, gorras, juguetes animé, cartoon, videojuegos, superhéroes y todo lo relacionado con el mundo geek.",
+    "inicio_actividades": "14:00",
+    "fin_actividades": "23:00",
+    "num_actividades": 2,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/feria-de-coleccionistas-santa-cruz-3XVNEBBE13.jpg",
+    "actividades": [
+      {
+        "nombre": "Exposición: Juguetes Coleccionables de Nuestra Infancia.",
+        "inicio": "14:00",
+        "fin": "23:00"
+      },
+      {
+        "nombre": "Feria de Juguetes Coleccionables.",
+        "inicio": "14:00",
+        "fin": "21:00"
+      }
+    ]
+  },
+  {
+    "id": "fundacion-cultural-benjamin-capital-de-ideas",
+    "nombre": "Fundación Cultural Benjamín: Capital de ideas",
+    "direccion": "Barrio Equipetrol, avenida San Martín, calle Pablo Sanz # 22",
+    "lat": -17.762108939394057,
+    "lng": -63.19583668911405,
+    "area": "Fundación",
+    "responsable": "Sarita Mansilla",
+    "whatsapp": "76028390",
+    "redes": {
+      "facebook": "https://www.facebook.com/CentroCulturalBenjamin",
+      "instagram": "https://www.instagram.com/benjaminlibro"
+    },
+    "descripcion": "La Fundación Cultural Benjamín es un lugar lleno de magia que se alimenta del arte, la vegetación, la cultura y la literatura en un callejón artístico en pleno barrio Equipetrol.",
+    "inicio_actividades": "17:00",
+    "fin_actividades": "22:00",
+    "num_actividades": 1,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/fundacion-cultural-benjamin-capital-de-ideas-1QWCQVYYHV.jpg",
+    "actividades": [
+      {
+        "nombre": "Exposición de Arte y Cultura.",
+        "inicio": "17:00",
+        "fin": "22:00"
+      }
+    ]
+  },
+  {
+    "id": "fundacion-igualdad",
+    "nombre": "Fundación Igualdad",
+    "direccion": "Calle Charcas, esq. Murillo # 170",
+    "lat": -17.780590454862427,
+    "lng": -63.180098221861996,
+    "area": "Fundación",
+    "responsable": "Noe Alexis Rueda Álvarez",
+    "whatsapp": "70973932",
+    "redes": {
+      "facebook": "https://www.facebook.com/figualdadlgbt",
+      "instagram": "https://www.instagram.com/igualdadbo/"
+    },
+    "descripcion": "Fundación Igualdad.",
+    "inicio_actividades": "16:00",
+    "fin_actividades": "22:00",
+    "num_actividades": 5,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/fundacion-igualdad-Y53DDGZXH9.jpg",
+    "actividades": []
+  },
+  {
+    "id": "laboratorios-pedagogicos-de-la-fundacion-patino",
+    "nombre": "Fundación Patiño",
+    "direccion": "Calle Independencia # 89, esq. Suárez de Figueroa",
+    "lat": -17.78577243353071,
+    "lng": -63.18237544604452,
+    "area": "Fundación",
+    "responsable": "María Elva Aguilera",
+    "whatsapp": "78459137",
+    "redes": {
+      "facebook": "https://www.facebook.com/EspacioPatinoSantaCruz",
+      "instagram": "https://www.instagram.com/fundacionpatino"
+    },
+    "descripcion": "La Fundación Patiño cuenta con información gratuita y de fácil acceso para escolares, universitarios, investigadores y público en general. Tiene un makerspace, un cowork y ciclos de talleres.",
+    "inicio_actividades": "17:00",
+    "fin_actividades": "23:00",
+    "num_actividades": 3,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/laboratorios-pedagogicos-de-la-fundacion-patino-HKRUZ8KSZ8.jpg",
+    "actividades": [
+      {
+        "nombre": "Talleres y actividades artísticas.",
+        "inicio": "17:00",
+        "fin": "23:00"
+      },
+      {
+        "nombre": "Exhibición y talleres creativos.",
+        "inicio": "18:00",
+        "fin": "22:00"
+      }
+    ]
+  },
+  {
+    "id": "galeria-heberth-roman",
+    "nombre": "Galería de Arte Heberth Román",
+    "direccion": "Calle René Moreno # 440 entre Manuel Ignacio y Republiquetas",
+    "lat": -17.78848651352345,
+    "lng": -63.18094249666401,
+    "area": "Galería",
+    "responsable": "Sandra Román de Echazú",
+    "whatsapp": "75020508",
+    "redes": {
+      "facebook": "https://www.facebook.com/profile.php?id=100056212992877",
+      "instagram": "https://www.instagram.com/galeriadearteheberthroman"
+    },
+    "descripcion": "La Galería de Arte Heberth Román es un espacio cultural que promueve actividades de las diversas manifestaciones del arte y la cultura.",
+    "inicio_actividades": "16:00",
+    "fin_actividades": "23:00",
+    "num_actividades": 2,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/galeria-heberth-roman-NPR5YXBWHT.jpg",
+    "actividades": [
+      {
+        "nombre": "Apertura y recorrido de galería.",
+        "inicio": "18:00",
+        "fin": "23:00"
+      },
+      {
+        "nombre": "Modelado en arcilla.",
+        "inicio": "20:00",
+        "fin": "20:30"
+      }
+    ]
+  },
+  {
+    "id": "galeria-de-arte-koqui-handal",
+    "nombre": "Galería de Arte Koqui Handal, Manzana 40",
+    "direccion": "Barrio Equipetrol Norte, avenida San Martín, calle K. Manzana 40, Torre 2, planta baja",
+    "lat": -17.757498,
+    "lng": -63.199756,
+    "area": "Galería",
+    "responsable": "Patricia Guerra",
+    "whatsapp": "61552178",
+    "redes": {
+      "facebook": "https://www.facebook.com/KoquiHandal",
+      "instagram": "https://www.instagram.com/koqui_handal"
+    },
+    "descripcion": "La Galería de Arte Koqui Handal se inauguró en 2005. En 2022, se inauguró la galería oficial en Manzana 40, como un tributo a la ciudad y a la nueva infraestructura del edificio inteligente.",
+    "inicio_actividades": "10:00",
+    "fin_actividades": "21:00",
+    "num_actividades": 1,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/galeria-de-arte-koqui-handal-0X50526B47.jpg",
+    "actividades": [
+      {
+        "nombre": "Colecciones de arte de Koqui Handal.",
+        "inicio": "10:00",
+        "fin": "21:00"
+      }
+    ]
+  },
+  {
+    "id": "galeria-de-arte-los-tajibos",
+    "nombre": "Galería de Arte. Los Tajibos, a Tribute Portfolio Hotel",
+    "direccion": "Barrio Equipetrol, avenida San Martín # 455, tercer anillo interno",
+    "lat": -17.764503,
+    "lng": -63.196491,
+    "area": "Hotel",
+    "responsable": "María Esther Díaz",
+    "whatsapp": "70985562",
+    "redes": {
+      "facebook": "https://www.facebook.com/lostajiboshotel",
+      "instagram": "https://www.instagram.com/lostajiboshotel"
+    },
+    "descripcion": "La Galería de Arte Los Tajibos es un espacio dedicado a la exhibición y promoción del arte, principalmente en pintura y escultura. Está abierta desde la fundación del hotel (1975).",
+    "inicio_actividades": "17:30",
+    "fin_actividades": "21:30",
+    "num_actividades": 1,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/galeria-de-arte-los-tajibos-MHB5ERSW5P.jpg",
+    "actividades": [
+      {
+        "nombre": "Exposición de Arte.",
+        "inicio": "17:30",
+        "fin": "21:30"
+      }
+    ]
+  },
+  {
+    "id": "galeria-la-santa",
+    "nombre": "Galería La Santa",
+    "direccion": "Av. Velarde # 120",
+    "lat": -17.79306820254619,
+    "lng": -63.18109586728624,
+    "area": "Galería",
+    "responsable": "Mijail Orgaz",
+    "whatsapp": "76033978",
+    "redes": {
+      "instagram": "https://www.instagram.com/galerialasanta120"
+    },
+    "descripcion": "Galería La Santa.",
+    "inicio_actividades": "19:00",
+    "fin_actividades": "22:30",
+    "num_actividades": 2,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/galeria-la-santa-YQHC2G2T7M.jpg",
+    "actividades": [
+      {
+        "nombre": "Recorrido guiado de exposición.",
+        "inicio": "18:45",
+        "fin": "23:00"
+      },
+      {
+        "nombre": "Video Mapping Inmersivo.",
+        "inicio": "19:45",
+        "fin": "22:30"
+      }
+    ]
+  },
+  {
+    "id": "gobierno-autonomo-departamental-de-santa-cruz-de-la-sierra",
+    "nombre": "Gobierno Autónomo Departamental de Santa Cruz I Casa de Gobierno",
+    "direccion": "Casa de Gobierno (Plaza de Armas 24 de Septiembre, acera norte)",
+    "lat": -17.782668,
+    "lng": -63.182184,
+    "area": "Museo",
+    "responsable": "Danilo Andrés Drakic Ballivián",
+    "whatsapp": "63398957",
+    "redes": {
+      "facebook": "https://www.facebook.com/GobSantaCruz",
+      "instagram": "https://www.instagram.com/gobsantacruz"
+    },
+    "descripcion": "La Casa de Gobierno tiene más de 70 años. Actualmente alberga la Dirección de Relaciones Internacionales y el Instituto Cruceño de Estadística.",
+    "inicio_actividades": "16:00",
+    "fin_actividades": "23:00",
+    "num_actividades": 1,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/gobierno-autonomo-departamental-de-santa-cruz-de-la-sierra-ZP0U748KM1.jpg",
+    "actividades": [
+      {
+        "nombre": "Recorrido por la sala permanente.",
+        "inicio": "17:00",
+        "fin": "23:00"
+      }
+    ]
+  },
+  {
+    "id": "goethe-zentrum-santa-cruz",
+    "nombre": "Goethe-Zentrum Santa Cruz",
+    "direccion": "Calle 24 de Septiembre # 36 (Plaza de Armas 24 de Septiembre, acera este)",
+    "lat": -17.783352,
+    "lng": -63.181552,
+    "area": "Centro Cultural",
+    "responsable": "Franz-Josef Kunz",
+    "whatsapp": "65908681",
+    "redes": {
+      "facebook": "https://www.facebook.com/GoetheZentrumSC",
+      "instagram": "https://www.instagram.com/goethe.zentrumsc"
+    },
+    "descripcion": "El Goethe-Zentrum Santa Cruz lleva más de 50 años de funcionamiento. Es el Instituto Cultural de Alemania en Santa Cruz de la Sierra. Fomenta el conocimiento de la lengua alemana y la colaboración cultural internacional.",
+    "inicio_actividades": "16:00",
+    "fin_actividades": "23:00",
+    "num_actividades": 2,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/goethe-zentrum-santa-cruz-9M0JW6LP9Y.jpg",
+    "actividades": [
+      {
+        "nombre": "Exposición Artística.",
+        "inicio": "17:00",
+        "fin": "23:00"
+      }
+    ]
+  },
+  {
+    "id": "hoy-coffe",
+    "nombre": "Hoy Coffee",
+    "direccion": "Interior del Centro de la Cultura Plurinacional Santa Cruz, CCP (calle René Moreno # 369)",
+    "lat": -17.787456206431056,
+    "lng": -63.18139616705666,
+    "area": "Cafetería",
+    "responsable": "Luz Cecilia Saucedo Lobos",
+    "whatsapp": "69007398",
+    "redes": {
+      "instagram": "https://www.instagram.com/hoycoffee.scz"
+    },
+    "descripcion": "Hoy Coffee.",
+    "inicio_actividades": "17:00",
+    "fin_actividades": "23:00",
+    "num_actividades": 1,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/hoy-coffe-ADY7B9YTNU.jpg",
+    "actividades": [
+      {
+        "nombre": "Café cultural con música en vivo.",
+        "inicio": "17:00",
+        "fin": "23:00"
+      }
+    ]
+  },
+  {
+    "id": "inarte",
+    "nombre": "InArte",
+    "direccion": "Calle René Moreno # 74",
+    "lat": -17.784505862509743,
+    "lng": -63.1814324271939,
+    "area": "Cafetería",
+    "responsable": "Eliana Justiniano",
+    "whatsapp": "78148601",
+    "redes": {
+      "facebook": "https://www.facebook.com/share/18GhGU1aoy/",
+      "instagram": "https://www.instagram.com/inarte.scz"
+    },
+    "descripcion": "InArte.",
+    "inicio_actividades": "15:00",
+    "fin_actividades": "23:00",
+    "num_actividades": 5,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/inarte-NR47O2FYAK.jpg",
+    "actividades": [
+      {
+        "nombre": "Exposición de arte y fotografía.",
+        "inicio": "15:00",
+        "fin": "23:00"
+      },
+      {
+        "nombre": "Experiencia InArte: Menú de galería - Sabores de la larga noche.",
+        "inicio": "15:00",
+        "fin": "23:00"
+      },
+      {
+        "nombre": "Terraza InArte: Sesión Acústica instrumental.",
+        "inicio": "21:00",
+        "fin": "22:00"
+      }
+    ]
+  },
+  {
+    "id": "tatapy",
+    "nombre": "Instituto Tatapy",
+    "direccion": "Avenida Santa Cruz # 832, casi avenida Brasil (segundo anillo)",
+    "lat": -17.78871643889535,
+    "lng": -63.165221698909576,
+    "area": "Centro Educativo",
+    "responsable": "Alejandro Borda",
+    "whatsapp": "76052906",
+    "redes": {
+      "facebook": "https://www.facebook.com/escuela.tatapy/",
+      "instagram": "https://www.instagram.com/institutotatapy/"
+    },
+    "descripcion": "El Instituto Tatapy es un centro de formación con características únicas para la formación de profesionales en el sector hotelero y gastronómico.",
+    "inicio_actividades": "13:30",
+    "fin_actividades": "23:00",
+    "num_actividades": 1,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/tatapy-9KS1STDRNT.jpg",
+    "actividades": [
+      {
+        "nombre": "Feria del Churrasco.",
+        "inicio": "13:30",
+        "fin": "19:00"
+      }
+    ]
+  },
+  {
+    "id": "galeria-kiosko",
+    "nombre": "Kiosko Galería",
+    "direccion": "Calle Arenales # 315, entre Aroma y Quijarro",
+    "lat": -17.7813646617442,
+    "lng": -63.17833759405099,
+    "area": "Galería",
+    "responsable": "Raquel Schwartz",
+    "whatsapp": "65014880",
+    "redes": {
+      "facebook": "https://www.facebook.com/kioskogaleria",
+      "instagram": "https://www.instagram.com/kiosko_galeria"
+    },
+    "descripcion": "Kiosko Galería es una plataforma para las generaciones venideras. Desde su fundación en 2006 desarrolla exposiciones, talleres, conferencias, clínicas, proyectos editoriales y presentaciones de libros.",
+    "inicio_actividades": "16:00",
+    "fin_actividades": "23:00",
+    "num_actividades": 2,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/galeria-kiosko-3F6NBBFHER.jpg",
+    "actividades": []
+  },
+  {
+    "id": "la-federal-espacio-colaborativo",
+    "nombre": "La Federal Espacio Colaborativo",
+    "direccion": "Calle Ballivián # 66",
+    "lat": -17.78484387168115,
+    "lng": -63.18092058198929,
+    "area": "Centro Cultural",
+    "responsable": "Benicia Chávez Vidal",
+    "whatsapp": "77064184",
+    "redes": {
+      "facebook": "https://www.facebook.com/lafederalscz",
+      "instagram": "https://www.instagram.com/lafederal_scz/"
+    },
+    "descripcion": "La Federal Espacio Colaborativo es un proyecto desarrollado en una casa patrimonial que busca generar actividades artísticas y culturales. Cuenta con gastronomía y se ubica en el centro histórico.",
+    "inicio_actividades": "16:00",
+    "fin_actividades": "23:00",
+    "num_actividades": 16,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/la-federal-espacio-colaborativo-9FRPYXIBCG.jpg",
+    "actividades": [
+      {
+        "nombre": "Performance, mapping y DJ en Ganesha Bar.",
+        "inicio": "20:00",
+        "fin": "23:00"
+      }
+    ]
+  },
+  {
+    "id": "la-pascana",
+    "nombre": "La Pascana",
+    "direccion": "Calle Sucre # 5, esq. René Moreno (Plaza de Armas 24 de Septiembre, acera este)",
+    "lat": -17.78365410113996,
+    "lng": -63.18131212940727,
+    "area": "Restaurante",
+    "responsable": "Abigail Saire",
+    "whatsapp": "69804951",
+    "redes": {
+      "facebook": "https://www.facebook.com/lapascanascz",
+      "instagram": "https://www.instagram.com/lapascanascz"
+    },
+    "descripcion": "La Pascana es un punto de encuentro en Santa Cruz de la Sierra desde 1950. Desde allí se dio inicio a la primera noche de mascaritas como parte del Carnaval. Brinda servicios de hotelería, gastronomía y eventos.",
+    "inicio_actividades": "18:00",
+    "fin_actividades": "23:00",
+    "num_actividades": 7,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/la-pascana-H1BXM31IPV.jpg",
+    "actividades": [
+      {
+        "nombre": "Exposición Patrimonial y Cultural.",
+        "inicio": "18:00",
+        "fin": "23:00"
+      },
+      {
+        "nombre": "Stand de Demostración de Grabado Interactivo.",
+        "inicio": "19:30",
+        "fin": "22:00"
+      },
+      {
+        "nombre": "Experiencia Gastronómica Minidegustación.",
+        "inicio": "20:00",
+        "fin": "23:00"
+      },
+      {
+        "nombre": "Música en vivo (saxofonista).",
+        "inicio": "20:00",
+        "fin": "23:00"
+      }
+    ]
+  },
+  {
+    "id": "la-radio-cafe-museo-de-la-radiodifusion-crucena",
+    "nombre": "La Radio Coffee Bistró - Museo de la Radiodifusión Cruceña",
+    "direccion": "Calle Independencia # 372, entre Pari y Mercado",
+    "lat": -17.787699906915677,
+    "lng": -63.1821811180842,
+    "area": "Cafetería",
+    "responsable": "Mauricio Mendívil",
+    "whatsapp": "60012412",
+    "redes": {
+      "facebook": "https://www.facebook.com/profile.php?id=100066780110264"
+    },
+    "descripcion": "Un café para recordar los 50 años de la histórica ubicación de Radio Oriental.",
+    "inicio_actividades": "16:00",
+    "fin_actividades": "22:00",
+    "num_actividades": 1,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/la-radio-cafe-museo-de-la-radiodifusion-crucena-4LJQ4Z6FI2.jpg",
+    "actividades": [
+      {
+        "nombre": "Exposición Fotográfica.",
+        "inicio": "18:00",
+        "fin": "22:00"
+      }
+    ]
+  },
+  {
+    "id": "la-rota-carlota",
+    "nombre": "La Rota Carlota",
+    "direccion": "Calle Bolívar # 181",
+    "lat": -17.782459944657326,
+    "lng": -63.179763477523494,
+    "area": "Otro",
+    "responsable": "Miguel Alejandro Orellana Chávez",
+    "whatsapp": "70001144",
+    "redes": {
+      "facebook": "https://www.facebook.com/share/1DHbQcm5L5/",
+      "instagram": "https://www.instagram.com/larotacarlota"
+    },
+    "descripcion": "La Rota Carlota.",
+    "inicio_actividades": "18:00",
+    "fin_actividades": "21:30",
+    "num_actividades": 1,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/la-rota-carlota-YX7WA2HICO.jpg",
+    "actividades": [
+      {
+        "nombre": "Exposición de Arte.",
+        "inicio": "18:00",
+        "fin": "21:30"
+      }
+    ]
+  },
+  {
+    "id": "mano-en-llamas",
+    "nombre": "Mano en Llamas",
+    "direccion": "Calle Arenales, esq. Beni # 91",
+    "lat": -17.7816692,
+    "lng": -63.1808616,
+    "area": "Centro Cultural",
+    "responsable": "Hassam Rabaj",
+    "whatsapp": "76705666",
+    "redes": {
+      "facebook": "https://www.facebook.com/manoenllamas",
+      "instagram": "https://www.instagram.com/manoenllamastatuaje"
+    },
+    "descripcion": "Mano en Llamas.",
+    "inicio_actividades": "17:00",
+    "fin_actividades": "00:00",
+    "num_actividades": 1,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/mano-en-llamas-N4GGPN6TEV.jpg",
+    "actividades": [
+      {
+        "nombre": "Presentación artística y concierto.",
+        "inicio": "18:00",
+        "fin": "00:00"
+      }
+    ]
+  },
+  {
+    "id": "manzana-1-espacio-de-arte",
+    "nombre": "Manzana 1 Espacio de Arte",
+    "direccion": "Calle Independencia, entre Ayacucho e Ingavi",
+    "lat": -17.78416457172149,
+    "lng": -63.18249548174968,
+    "area": "Galería",
+    "responsable": "Leyla Anas",
+    "whatsapp": "72153952",
+    "redes": {
+      "facebook": "https://www.facebook.com/Manzana1espaciodearte",
+      "instagram": "https://www.instagram.com/manzana.uno"
+    },
+    "descripcion": "Manzana 1 Espacio de Arte es una asociación civil sin fines de lucro ubicada en la primera manzana de la ciudad. El edificio, declarado patrimonio histórico, fue reinaugurado como espacio cultural en 2005.",
+    "inicio_actividades": "15:00",
+    "fin_actividades": "23:00",
+    "num_actividades": 4,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/manzana-1-espacio-de-arte-96LTFQST7K.jpg",
+    "actividades": [
+      {
+        "nombre": "Exposición Fotográfica: Manzana 1 / 20 Años (Arte en la Plaza).",
+        "inicio": "10:00",
+        "fin": "23:00"
+      },
+      {
+        "nombre": "Exposición: Edseada Medi (Nuestra tierra, en lengua tacana). Fotografías de las naciones Ese Ejja, Machineri, Tacana y Yaminahua (Arte en la Plaza).",
+        "inicio": "10:00",
+        "fin": "23:00"
+      },
+      {
+        "nombre": "Exposición: Alcides Calizaya, Freddy Huchani, Mario Ibáñez, Richard Sánchez y Giancarla Muñoz (Planta Alta).",
+        "inicio": "15:00",
+        "fin": "23:00"
+      },
+      {
+        "nombre": "Exposición: Antonio Mariaca, 100 años, 1926 - 2026 (Planta Alta).",
+        "inicio": "15:00",
+        "fin": "23:00"
+      }
+    ]
+  },
+  {
+    "id": "galeria-marqueteria-dali",
+    "nombre": "Marquetería & Galería Dalí",
+    "direccion": "Calle Ballivián # 117, entre Chuquisaca y La Paz",
+    "lat": -17.78475686416909,
+    "lng": -63.180085865616086,
+    "area": "Galería",
+    "responsable": "Samuel Rodríguez",
+    "whatsapp": "70820031",
+    "redes": {
+      "facebook": "https://www.facebook.com/marqueteriadali",
+      "instagram": "https://www.instagram.com/marqueteria_dalii/"
+    },
+    "descripcion": "Marquetería & Galería Dalí.",
+    "inicio_actividades": "17:00",
+    "fin_actividades": "00:00",
+    "num_actividades": 2,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/galeria-marqueteria-dali-U2ND120JMT.jpg",
+    "actividades": [
+      {
+        "nombre": "Exposición pictórica.",
+        "inicio": "17:00",
+        "fin": "00:00"
+      }
+    ]
+  },
+  {
+    "id": "ministerio-de-turismo-sostenible-culturas-folklore-y-gastronomia",
+    "nombre": "Ministerio de Turismo Sostenible, Culturas, Folklore y Gastronomía",
+    "direccion": "Calle Junín # 146, entre Libertad y 21 de Mayo",
+    "lat": -17.78274269580551,
+    "lng": -63.18325135650173,
+    "area": "Otro",
+    "responsable": "Selma Baldiviezo Cassís",
+    "whatsapp": "70670763",
+    "redes": {
+      "facebook": "https://www.facebook.com/MTSCFyG",
+      "instagram": "https://www.instagram.com/mtscfyg"
+    },
+    "descripcion": "Ministerio de Turismo Sostenible, Culturas, Folklore y Gastronomía.",
+    "inicio_actividades": "15:00",
+    "fin_actividades": "23:00",
+    "num_actividades": 9,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/ministerio-de-turismo-sostenible-culturas-folklore-y-gastronomia-Z9P6Y2UUCB.jpg",
+    "actividades": [
+      {
+        "nombre": "Encuentro de escritores (Sodesbo).",
+        "inicio": "15:00",
+        "fin": "23:00"
+      },
+      {
+        "nombre": "Exhibición de procesos y técnicas artísticas (Arte Creart Imago).",
+        "inicio": "15:00",
+        "fin": "23:00"
+      },
+      {
+        "nombre": "Muestra de artesanías chiquitanas y guaraníes.",
+        "inicio": "15:00",
+        "fin": "21:00"
+      },
+      {
+        "nombre": "Subasta de Arte Creart Imago.",
+        "inicio": "20:00",
+        "fin": "21:00"
+      }
+    ]
+  },
+  {
+    "id": "exhibicion-mira",
+    "nombre": "Mirá Feria de Arte y Diseño",
+    "direccion": "Capilla Los Huérfanos. Calle Monseñor Salvatierra, entre René Moreno e Independencia",
+    "lat": -17.78898614626988,
+    "lng": -63.18114600141558,
+    "area": "Fundación",
+    "responsable": "Elizabeth Castro de Breede",
+    "whatsapp": "78153730",
+    "redes": {
+      "facebook": "https://www.facebook.com/exhibicionmira",
+      "instagram": "https://www.instagram.com/miraoficial.bo"
+    },
+    "descripcion": "Mirá es una exhibición que propone una experiencia única e irrepetible. Es un evento con relevantes actores en diseño, arquitectura, tendencias en decoración y en el mundo del arte vanguardista.",
+    "inicio_actividades": "17:00",
+    "fin_actividades": "23:00",
+    "num_actividades": 1,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/exhibicion-mira-406ERMA3QN.jpg",
+    "actividades": [
+      {
+        "nombre": "Muestras de Arte - Exposición.",
+        "inicio": "17:00",
+        "fin": "23:00"
+      }
+    ]
+  },
+  {
+    "id": "museo-artecampo",
+    "nombre": "Museo Artecampo, Arte Originario y Popular de las Tierras Bajas",
+    "direccion": "Avenida José Estenssoro # 3.310, casi avenida Roca y Coronado (tercer anillo externo)",
+    "lat": -17.786811,
+    "lng": -63.206499,
+    "area": "Museo",
+    "responsable": "Alejandra Rueda",
+    "whatsapp": "67844731",
+    "redes": {
+      "facebook": "https://www.facebook.com/MuseoArtecampo",
+      "instagram": "https://www.instagram.com/artecampo"
+    },
+    "descripcion": "El Museo Artecampo alberga una colección de piezas contemporáneas de los grupos étnicos guaraníes, ayoreos, guarayos, chiquitanos y comunidades interculturales. Cuenta con salas de exhibición.",
+    "inicio_actividades": "16:00",
+    "fin_actividades": "22:00",
+    "num_actividades": 5,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/museo-artecampo-A3MGYIJHL1.jpg",
+    "actividades": []
+  },
+  {
+    "id": "museo-de-arte-contemporaneo",
+    "nombre": "Museo de Arte Contemporáneo, MAC",
+    "direccion": "Calle Sucre, esq. Potosí",
+    "lat": -17.783551,
+    "lng": -63.177145,
+    "area": "Museo",
+    "responsable": "Sebastián Galarza",
+    "whatsapp": "76313450",
+    "redes": {
+      "facebook": "https://www.facebook.com/macscb",
+      "instagram": "https://www.instagram.com/museodeartescz"
+    },
+    "descripcion": "El Museo de Arte Contemporáneo (MAC) es único en su género en Bolivia. Se dedica a la difusión de las diversas expresiones artísticas a escalas local, nacional e internacional.",
+    "inicio_actividades": "16:00",
+    "fin_actividades": "00:00",
+    "num_actividades": 5,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/museo-de-arte-contemporaneo-0RFL21N6GC.jpg",
+    "actividades": [
+      {
+        "nombre": "Concierto de la Banda Slackers TNT.",
+        "inicio": "20:00",
+        "fin": "20:45"
+      }
+    ]
+  },
+  {
+    "id": "museo-de-historia-natural-uagrm",
+    "nombre": "Museo de Historia - UAGRM",
+    "direccion": "Calle Junín # 151, entre calle Libertad y 21 de Mayo",
+    "lat": -17.782949694253183,
+    "lng": -63.18318813944121,
+    "area": "Museo",
+    "responsable": "Paula Peña Hasbún",
+    "whatsapp": "77354565",
+    "redes": {
+      "facebook": "https://www.facebook.com/Museodehistoria"
+    },
+    "descripcion": "El Museo de Historia es una unidad dependiente de la UAGRM que funciona desde 1996. Tiene como misión la difusión de la historia y la cultura departamental y nacional.",
+    "inicio_actividades": "15:00",
+    "fin_actividades": "22:00",
+    "num_actividades": 2,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/museo-de-historia-natural-uagrm-YLJ22APB3E.jpg",
+    "actividades": [
+      {
+        "nombre": "Circuito, 200 años de historia.",
+        "inicio": "15:00",
+        "fin": "22:00"
+      }
+    ]
+  },
+  {
+    "id": "museo-de-historia-natural-noel-kempff-mercado-uagrm",
+    "nombre": "Museo de Historia Natural Noel Kempff Mercado - UAGRM",
+    "direccion": "Avenida Irala # 565, entre avenidas Ejército Nacional y Velarde (primer anillo)",
+    "lat": -17.79269386473296,
+    "lng": -63.18187791196603,
+    "area": "Museo",
+    "responsable": "Luzmila Arroyo Padilla",
+    "whatsapp": "77049536",
+    "redes": {
+      "facebook": "https://www.facebook.com/MuseoNKM",
+      "instagram": "https://www.instagram.com/MuseoNKM"
+    },
+    "descripcion": "El Museo de Historia Natural Noel Kempff Mercado fue creado en 1986. Además de albergar una colección científica, se dedica a generar conocimiento, investigación y educación sobre la biodiversidad.",
+    "inicio_actividades": "16:00",
+    "fin_actividades": "23:00",
+    "num_actividades": 6,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/museo-de-historia-natural-noel-kempff-mercado-uagrm-27AT4TEH4T.jpg",
+    "actividades": []
+  },
+  {
+    "id": "museo-de-la-biblia",
+    "nombre": "Museo de la Biblia",
+    "direccion": "Calle Cuéllar # 155, entre Libertad y 21 de Mayo",
+    "lat": -17.778986348138655,
+    "lng": -63.18365993021375,
+    "area": "Museo",
+    "responsable": "Cesia Rosario Morales Dorado",
+    "whatsapp": "60506093",
+    "redes": {
+      "facebook": "https://www.facebook.com/museodelabiblia.bo/",
+      "instagram": "https://www.instagram.com/museodelabiblia.bo"
+    },
+    "descripcion": "El Museo de la Biblia se ubica en la calle Cuéllar # 155.",
+    "inicio_actividades": "18:00",
+    "fin_actividades": "21:00",
+    "num_actividades": 8,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/museo-de-la-biblia-JYZL2QE1BK.jpg",
+    "actividades": [
+      {
+        "nombre": "Exposición y recorrido guiado.",
+        "inicio": "18:00",
+        "fin": "21:00"
+      },
+      {
+        "nombre": "Coro y presentaciones musicales.",
+        "inicio": "18:00",
+        "fin": "21:00"
+      },
+      {
+        "nombre": "Cierre Musical.",
+        "inicio": "20:30",
+        "fin": "21:00"
+      }
+    ]
+  },
+  {
+    "id": "museo-de-la-ciudad-altillo-beni",
+    "nombre": "Museo de la Ciudad Altillo Beni - MAB",
+    "direccion": "Calle Beni # 50, entre Bolívar y Sucre, a una cuadra de la Plaza de Armas 24 de Septiembre",
+    "lat": -17.783158,
+    "lng": -63.180402,
+    "area": "Museo",
+    "responsable": "Telma Camacho",
+    "whatsapp": "78184584",
+    "redes": {
+      "facebook": "https://www.facebook.com/profile.php?id=61559697243959",
+      "instagram": "https://www.instagram.com/altillobeni"
+    },
+    "descripcion": "El Museo de la Ciudad Altillo Beni (MAB) es un espacio construido en una vieja casona con más de 170 años. Se dedica a la difusión de diversas expresiones artísticas. Cuenta con un patio colonial, un subsuelo y una terraza.",
+    "inicio_actividades": "16:00",
+    "fin_actividades": "00:00",
+    "num_actividades": 3,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/museo-de-la-ciudad-altillo-beni-GI7QBTPN6T.jpg",
+    "actividades": [
+      {
+        "nombre": "Apertura oficial de exposición.",
+        "inicio": "18:00",
+        "fin": "00:00"
+      }
+    ]
+  },
+  {
+    "id": "museo-de-la-independencia",
+    "nombre": "Museo de la Independencia Cruceña",
+    "direccion": "Calle Independencia, esq. Ayacucho (Plaza de Armas 24 de Septiembre y Manzana Uno)",
+    "lat": -17.783882,
+    "lng": -63.182506,
+    "area": "Museo",
+    "responsable": "Emir Iskenderian",
+    "whatsapp": "75307068",
+    "redes": {
+      "facebook": "https://www.facebook.com/museoindependenciascz"
+    },
+    "descripcion": "El Museo de la Independencia Cruceña difunde las historias de las batallas más importantes que derivaron en la independencia cruceña.",
+    "inicio_actividades": "16:00",
+    "fin_actividades": "23:00",
+    "num_actividades": 1,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/museo-de-la-independencia-P4H9G149WF.jpg",
+    "actividades": []
+  },
+  {
+    "id": "museo-entel",
+    "nombre": "Museo de Telecomunicaciones - Entel",
+    "direccion": "Avenida Cristo Redentor km 3½, entre cuarto y quinto anillo",
+    "lat": -17.74679,
+    "lng": -63.174321,
+    "area": "Museo",
+    "responsable": "Sigfredo Mendez",
+    "whatsapp": "72650694",
+    "redes": {
+      "facebook": "https://www.facebook.com/Entel.Bolivia",
+      "instagram": "https://www.instagram.com/entel.bolivia"
+    },
+    "descripcion": "El primer Museo de Telecomunicaciones de Bolivia. Expone la evolución de las telecomunicaciones en Bolivia y el mundo desde sus inicios hasta la actualidad.",
+    "inicio_actividades": "16:00",
+    "fin_actividades": "23:00",
+    "num_actividades": 1,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/museo-entel-XIPAUJLOE6.jpg",
+    "actividades": []
+  },
+  {
+    "id": "museo-guarani-isoceno",
+    "nombre": "Museo Guaraní Isoseño",
+    "direccion": "Avenida Marcelo Terceros Banzer # 7, entre Las Liras y Las Pavas (tercer anillo externo, detrás del Zoo)",
+    "lat": -17.758825,
+    "lng": -63.184938,
+    "area": "Museo",
+    "responsable": "Felipe Morales",
+    "whatsapp": "71602042",
+    "redes": {
+      "facebook": "https://www.facebook.com/museoguarani"
+    },
+    "descripcion": "El Museo Guaraní Isoseño inició sus actividades en junio de 2004. Exhibe y relaciona los bienes y valores patrimoniales de las 27 comunidades guaraníes.",
+    "inicio_actividades": "18:00",
+    "fin_actividades": "21:00",
+    "num_actividades": 6,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/museo-guarani-isoceno-8SQIRDM7K8.jpg",
+    "actividades": [
+      {
+        "nombre": "Arte Guaraní - Exposición permanente.",
+        "inicio": "18:00",
+        "fin": "21:00"
+      },
+      {
+        "nombre": "Teatro de Títeres: El Rosal en el Pantanal.",
+        "inicio": "19:00",
+        "fin": "19:30"
+      },
+      {
+        "nombre": "Música Autóctona Guaraní.",
+        "inicio": "19:30",
+        "fin": "20:00"
+      },
+      {
+        "nombre": "Teatro de Títeres: El Rosal en el Pantanal.",
+        "inicio": "20:00",
+        "fin": "20:30"
+      },
+      {
+        "nombre": "Música Autóctona Guaraní.",
+        "inicio": "20:30",
+        "fin": "21:00"
+      }
+    ]
+  },
+  {
+    "id": "museo-heroes-de-la-guerra-del-chaco",
+    "nombre": "Museo Histórico Militar Héroes de la Guerra del Chaco",
+    "direccion": "Calle Bolívar # 468, entre Campero y Quijarro",
+    "lat": -17.782424,
+    "lng": -63.176689,
+    "area": "Museo",
+    "responsable": "Wálter Daniel Mariscal Sánchez",
+    "whatsapp": "68420270",
+    "redes": {
+      "facebook": "https://www.facebook.com/profile.php?id=100064698009585"
+    },
+    "descripcion": "Creado el 24 de septiembre de 2014, este museo fomenta la investigación historiográfica militar y difunde la cultura histórica, militar y cívica.",
+    "inicio_actividades": "17:00",
+    "fin_actividades": "23:00",
+    "num_actividades": 5,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/museo-heroes-de-la-guerra-del-chaco-0VB8L1B4O0.jpg",
+    "actividades": [
+      {
+        "nombre": "Recorrido de colección permanente.",
+        "inicio": "17:00",
+        "fin": "23:00"
+      },
+      {
+        "nombre": "Monólogo: Defensa de Villa Montes.",
+        "inicio": "19:00",
+        "fin": "19:15"
+      },
+      {
+        "nombre": "Teatralización: Defensa de Boquerón.",
+        "inicio": "20:00",
+        "fin": "20:45"
+      },
+      {
+        "nombre": "Monólogo: Toque de Silencio.",
+        "inicio": "21:00",
+        "fin": "21:15"
+      },
+      {
+        "nombre": "Danzas nacionales.",
+        "inicio": "22:00",
+        "fin": "22:30"
+      }
+    ]
+  },
+  {
+    "id": "museo-german-busch",
+    "nombre": "Museo Histórico Nacional Tgral. Germán Busch Becerra - Colegio Militar de Aviación, Colmilav",
+    "direccion": "Avenida Santos Dumont, entre segundo y tercer anillo",
+    "lat": -17.8043377,
+    "lng": -63.1798907,
+    "area": "Otro",
+    "responsable": "Rodolfo Mendoza",
+    "whatsapp": "71092689",
+    "redes": {},
+    "descripcion": "El Museo Histórico Nacional Tgral. Germán Busch Becerra se fundó el 29 de mayo de 1998. Expone elementos relacionados con la vida del extinto presidente de Bolivia y sobre la aviación en el país.",
+    "inicio_actividades": "18:00",
+    "fin_actividades": "23:00",
+    "num_actividades": 1,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/museo-german-busch-ULOY7FCG2Y.jpg",
+    "actividades": [
+      {
+        "nombre": "Exposición de Arte Contemporáneo.",
+        "inicio": "18:00",
+        "fin": "23:00"
+      }
+    ]
+  },
+  {
+    "id": "museo-vargas",
+    "nombre": "Museo Vargas",
+    "direccion": "Calle René Moreno # 64",
+    "lat": -17.784327611035774,
+    "lng": -63.181450293195454,
+    "area": "Museo",
+    "responsable": "Alan Vargas",
+    "whatsapp": "77617439",
+    "redes": {
+      "facebook": "https://www.facebook.com/profile.php?id=61558461654677",
+      "instagram": "https://www.instagram.com/museovargas"
+    },
+    "descripcion": "El Museo Vargas busca rescatar, restaurar y mostrar al público la historia a través de aquellas piezas antiguas que marcaron varias épocas.",
+    "inicio_actividades": "16:00",
+    "fin_actividades": "23:00",
+    "num_actividades": 5,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/museo-vargas-UVDUWFOVHH.jpg",
+    "actividades": [
+      {
+        "nombre": "Recorrido museístico.",
+        "inicio": "18:00",
+        "fin": "23:00"
+      },
+      {
+        "nombre": "Música instrumental en vivo (saxofón).",
+        "inicio": "20:30",
+        "fin": "21:30"
+      }
+    ]
+  },
+  {
+    "id": "nupy-beagle-coffe",
+    "nombre": "Nupy Beagle Coffee",
+    "direccion": "Calle Velasco # 152, entre Ingavi y Suárez de Figueroa",
+    "lat": -17.78562661095432,
+    "lng": -63.18359402599416,
+    "area": "Cafetería",
+    "responsable": "John Vargas",
+    "whatsapp": "69106923",
+    "redes": {
+      "facebook": "https://www.facebook.com/share/1Ca6mDzqFs/",
+      "instagram": "https://www.instagram.com/nupy.coffee"
+    },
+    "descripcion": "Nupy Beagle Coffee.",
+    "inicio_actividades": "18:30",
+    "fin_actividades": "23:00",
+    "num_actividades": 1,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/nupy-beagle-coffe-CZM1HI1ESU.jpg",
+    "actividades": [
+      {
+        "nombre": "Actividad de bienvenida y visitas.",
+        "inicio": "18:30",
+        "fin": "23:00"
+      },
+      {
+        "nombre": "Pinta tu Snoopy.",
+        "inicio": "19:00",
+        "fin": "21:30"
+      }
+    ]
+  },
+  {
+    "id": "paletco",
+    "nombre": "Paletco",
+    "direccion": "Calle René Moreno # 481, al frente del Teatro René Moreno",
+    "lat": -17.788552223275296,
+    "lng": -63.1810802491861,
+    "area": "Galería",
+    "responsable": "Rossío Micol Vides Melendres",
+    "whatsapp": "67774127",
+    "redes": {},
+    "descripcion": "Paletco.",
+    "inicio_actividades": "16:45",
+    "fin_actividades": "22:45",
+    "num_actividades": 2,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/paletco-38S7QYAP9Z.jpg",
+    "actividades": [
+      {
+        "nombre": "Exposición de Paisajismo - Plantas Decorativas.",
+        "inicio": "16:45",
+        "fin": "22:45"
+      },
+      {
+        "nombre": "El arte en cuadros vivos (Taller de Armado de Cuadros Vivos con Plantas).",
+        "inicio": "20:00",
+        "fin": "22:45"
+      }
+    ]
+  },
+  {
+    "id": "paraninfo-universitario",
+    "nombre": "Paraninfo Universitario Dr. Humberto Parada Caro",
+    "direccion": "Calle Junín # 151, a media cuadra de la Plaza de Armas 24 de Septiembre",
+    "lat": -17.7829343,
+    "lng": -63.182957,
+    "area": "Centro Cultural",
+    "responsable": "Percy Schmitter Callaú",
+    "whatsapp": "70045335",
+    "redes": {},
+    "descripcion": "Este lugar inició sus actividades en 1958, con el nombre de Gran Cine Grigotá, donde funcionaba el Teatro Experimental Universitario. El 13 de junio de 1984 reabrió sus puertas como Paraninfo Universitario.",
+    "inicio_actividades": "16:30",
+    "fin_actividades": "22:00",
+    "num_actividades": 1,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/paraninfo-universitario-G9EW1MCAAH.jpg",
+    "actividades": [
+      {
+        "nombre": "Recorrido por la exposición y muestra de piezas.",
+        "inicio": "16:30",
+        "fin": "22:00"
+      }
+    ]
+  },
+  {
+    "id": "la-recova",
+    "nombre": "Paseo Artesanal La Recova, Unarcruz",
+    "direccion": "Calle Libertad, entre Florida y Junín",
+    "lat": -17.782142618236115,
+    "lng": -63.18287059647983,
+    "area": "Centro Cultural",
+    "responsable": "Dorys Montaño",
+    "whatsapp": "70868260",
+    "redes": {},
+    "descripcion": "El Paseo Artesanal La Recova se encuentra ubicado a media cuadra de la plaza 24 de Septiembre. Cuenta con souvenirs típicos, más de 50 puestos y un escenario donde se realizan peñas folclóricas.",
+    "inicio_actividades": "10:00",
+    "fin_actividades": "22:00",
+    "num_actividades": 1,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/la-recova-8V1ZBJEW7U.jpg",
+    "actividades": [
+      {
+        "nombre": "Exhibición de objetos artesanales.",
+        "inicio": "10:00",
+        "fin": "22:00"
+      }
+    ]
+  },
+  {
+    "id": "patio-design",
+    "nombre": "Patio Design Lifestyle Center",
+    "direccion": "Av. Busch, esq. tercer anillo interno",
+    "lat": -17.7714111,
+    "lng": -63.2018157,
+    "area": "Otro",
+    "responsable": "Karen Céspedes",
+    "whatsapp": "76622989",
+    "redes": {
+      "facebook": "https://www.facebook.com/PatioDesignLifestyleCenter",
+      "instagram": "https://www.instagram.com/patiodesignlifestylecenter"
+    },
+    "descripcion": "Patio Design Lifestyle Center es un espacio en el que la moda, la gastronomía y la vida social se fusionan para brindar una experiencia única al visitante.",
+    "inicio_actividades": "10:00",
+    "fin_actividades": "23:00",
+    "num_actividades": 1,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/patio-design-EL6W9RT1F2.jpg",
+    "actividades": [
+      {
+        "nombre": "Exposición de esculturas talladas en madera.",
+        "inicio": "10:00",
+        "fin": "23:00"
+      }
+    ]
+  },
+  {
+    "id": "plaza-de-armas-24-de-septiembre",
+    "nombre": "Plaza de Armas 24 de Septiembre",
+    "direccion": "Casco Viejo",
+    "lat": -17.783224973101902,
+    "lng": -63.18213671746251,
+    "area": "Otro",
+    "responsable": "Paula Aramayo de Paz Soldán",
+    "whatsapp": "70899278",
+    "redes": {
+      "facebook": "https://www.facebook.com/CulturaTurismoSCZ",
+      "instagram": "https://www.instagram.com/culturaturismoscz"
+    },
+    "descripcion": "La Plaza de Armas 24 de Septiembre se convierte en el punto neurálgico de la Larga Noche de los Museos, con música, teatro y muchas expresiones artísticas.",
+    "inicio_actividades": "15:00",
+    "fin_actividades": "23:00",
+    "num_actividades": 2,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/plaza-de-armas-24-de-septiembre-ADG2IMRSWN.jpg",
+    "actividades": [
+      {
+        "nombre": "Plaza de Armas 24 de Septiembre - Actividad cultural.",
+        "inicio": "15:00",
+        "fin": "23:00"
+      },
+      {
+        "nombre": "Estatuas Vivientes.",
+        "inicio": "19:00",
+        "fin": "22:00"
+      }
+    ]
+  },
+  {
+    "id": "punto-magico",
+    "nombre": "Punto Mágico Santa Cruz",
+    "direccion": "Calle René Moreno # 30, entre Sucre y Ballivián",
+    "lat": -17.784086686533286,
+    "lng": -63.181496010652275,
+    "area": "Restaurante",
+    "responsable": "Oscar Gabriel Yankovic",
+    "whatsapp": "79390833",
+    "redes": {
+      "facebook": "https://www.facebook.com/puntomagicosantacruz",
+      "instagram": "https://www.instagram.com/puntomagicosantacruz"
+    },
+    "descripcion": "Punto Mágico es un restaurante temático basado en la magia, la espiritualidad y los cuatro elementos del mundo. Cuenta con dos salas, un jardín y una tienda de souvenirs.",
+    "inicio_actividades": "16:00",
+    "fin_actividades": "23:00",
+    "num_actividades": 1,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/punto-magico-HV43M47943.jpg",
+    "actividades": [
+      {
+        "nombre": "Exposición de objetos de colección con música en vivo.",
+        "inicio": "20:00",
+        "fin": "22:00"
+      }
+    ]
+  },
+  {
+    "id": "reciclart",
+    "nombre": "ReciclArt",
+    "direccion": "Manzana Uno",
+    "lat": -17.7844528449194,
+    "lng": -63.18248663488555,
+    "area": "Otro",
+    "responsable": "Bismark Méndez Gutiérrez",
+    "whatsapp": "77315764",
+    "redes": {},
+    "descripcion": "ReciclArt.",
+    "inicio_actividades": "15:00",
+    "fin_actividades": "00:00",
+    "num_actividades": 1,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/reciclart-54263O8H6Z.jpg",
+    "actividades": [
+      {
+        "nombre": "Sorteo.",
+        "inicio": "22:00",
+        "fin": "22:30"
+      }
+    ]
+  },
+  {
+    "id": "sarao-identidad-y-tradicion",
+    "nombre": "Sarao, Identidad y Tradición",
+    "direccion": "Calle Arenales # 351",
+    "lat": -17.78138725436625,
+    "lng": -63.1781168798421,
+    "area": "Centro Cultural",
+    "responsable": "Jacob Zapata",
+    "whatsapp": "70084298",
+    "redes": {},
+    "descripcion": "Sarao, Identidad y Tradición.",
+    "inicio_actividades": "18:00",
+    "fin_actividades": "22:00",
+    "num_actividades": 3,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/sarao-identidad-y-tradicion-ZO7JYVG3RP.jpg",
+    "actividades": [
+      {
+        "nombre": "Exposición de Arte.",
+        "inicio": "18:00",
+        "fin": "23:00"
+      },
+      {
+        "nombre": "Música, danza, literatura y gastronomía del Oriente boliviano.",
+        "inicio": "19:00",
+        "fin": "21:30"
+      }
+    ]
+  },
+  {
+    "id": "sociedad-biblica",
+    "nombre": "Sociedad Bíblica Boliviana",
+    "direccion": "Calle Cuéllar # 155, entre Libertad y 21 de Mayo",
+    "lat": -17.778986348138655,
+    "lng": -63.18365993021375,
+    "area": "Librería",
+    "responsable": "Juan Pablo Ramos Singuri",
+    "whatsapp": "72147020",
+    "redes": {
+      "facebook": "https://www.facebook.com/Sociedad.Biblica.Boliviana/",
+      "instagram": "https://www.instagram.com/sociedadbiblicaboliviana"
+    },
+    "descripcion": "La Sociedad Bíblica Boliviana (SBB) es una entidad cristiana de servicio que promueve la interacción con la palabra de Dios mediante su traducción, producción y distribución en diferentes idiomas.",
+    "inicio_actividades": "10:00",
+    "fin_actividades": "21:00",
+    "num_actividades": 10,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/sociedad-biblica-2AE5Z1G4IK.jpg",
+    "actividades": [
+      {
+        "nombre": "Sala de Ventas.",
+        "inicio": "10:00",
+        "fin": "21:00"
+      },
+      {
+        "nombre": "Cierre Musical.",
+        "inicio": "20:30",
+        "fin": "21:00"
+      }
+    ]
+  },
+  {
+    "id": "soria-school",
+    "nombre": "Soria School",
+    "direccion": "Avenida Irala # 46, entre Tarija y Cobija (primer anillo)",
+    "lat": -17.791006372898252,
+    "lng": -63.17400877667268,
+    "area": "Centro Educativo",
+    "responsable": "Elizabeth Rodríguez",
+    "whatsapp": "70997099",
+    "redes": {
+      "facebook": "https://www.facebook.com/ColegioSoriaSchool"
+    },
+    "descripcion": "El Soria School es un hito generacional en la educación cruceña. Fue fundado en 1962 por la profesora Arminda Soria de Rodríguez.",
+    "inicio_actividades": "17:00",
+    "fin_actividades": "20:00",
+    "num_actividades": 4,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/soria-school-VPD6LWK7MD.jpg",
+    "actividades": [
+      {
+        "nombre": "Actividad cultural y artística.",
+        "inicio": "17:00",
+        "fin": "20:00"
+      }
+    ]
+  },
+  {
+    "id": "studio-26",
+    "nombre": "Studio 26",
+    "direccion": "Calle Independencia, esq. Ayacucho",
+    "lat": -17.783961,
+    "lng": -63.182297,
+    "area": "Otro",
+    "responsable": "José Peña Ortiz",
+    "whatsapp": "70881241",
+    "redes": {},
+    "descripcion": "Studio 26.",
+    "inicio_actividades": "16:00",
+    "fin_actividades": "23:00",
+    "num_actividades": 1,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/studio-26-T5D5B6ALRI.jpg",
+    "actividades": []
+  },
+  {
+    "id": "taller-de-artes-visuales",
+    "nombre": "Taller de Artes Visuales",
+    "direccion": "Av. Cristóbal de Mendoza # 275, segundo anillo (zona de El Cristo Redentor)",
+    "lat": -17.77025456285327,
+    "lng": -63.183024591949085,
+    "area": "Fundación",
+    "responsable": "Marisol Céspedes Rocha",
+    "whatsapp": "72172734",
+    "redes": {
+      "facebook": "https://www.facebook.com/tallerdeartes.visuales.1",
+      "instagram": "https://www.instagram.com/tallerartesvisuales"
+    },
+    "descripcion": "Taller de Artes Visuales.",
+    "inicio_actividades": "15:00",
+    "fin_actividades": "19:00",
+    "num_actividades": 1,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/taller-de-artes-visuales-Z8UY5QTYXF.jpg",
+    "actividades": [
+      {
+        "nombre": "Demostración de Dibujo, pintura y cerámica.",
+        "inicio": "15:00",
+        "fin": "19:00"
+      }
+    ]
+  },
+  {
+    "id": "colectivo-saqra-y-tercer-patio",
+    "nombre": "Tercer Patio",
+    "direccion": "Calle Murillo # 261",
+    "lat": -17.780937008333968,
+    "lng": -63.17987902319504,
+    "area": "Otro",
+    "responsable": "Omaira Tapia Limachi",
+    "whatsapp": "69133191",
+    "redes": {},
+    "descripcion": "Tercer Patio.",
+    "inicio_actividades": "19:00",
+    "fin_actividades": "00:00",
+    "num_actividades": 1,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/colectivo-saqra-y-tercer-patio-GN22B7FV49.jpg",
+    "actividades": [
+      {
+        "nombre": "Posfolklore.",
+        "inicio": "21:00",
+        "fin": "23:00"
+      },
+      {
+        "nombre": "Posfolklore.",
+        "inicio": "21:00",
+        "fin": "23:00"
+      }
+    ]
+  },
+  {
+    "id": "calle-seoane",
+    "nombre": "UAGRM, Carrera de Arte",
+    "direccion": "Calle Seoane # 141, entre Libertad y 21 de Mayo",
+    "lat": -17.78000613648765,
+    "lng": -63.183368621759016,
+    "area": "Centro Educativo",
+    "responsable": "Nicole Andrade",
+    "whatsapp": "79941003",
+    "redes": {},
+    "descripcion": "La Universidad Autónoma Gabriel René Moreno es el centro de estudios superiores más grande del departamento de Santa Cruz. Cuenta con 18 facultades donde se imparten 69 programas de formación profesional.",
+    "inicio_actividades": "17:00",
+    "fin_actividades": "23:00",
+    "num_actividades": 3,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/calle-seoane-82HDQBFYNO.jpg",
+    "actividades": [
+      {
+        "nombre": "Exposición de obras.",
+        "inicio": "15:00",
+        "fin": "23:00"
+      },
+      {
+        "nombre": "Performances.",
+        "inicio": "19:30",
+        "fin": "20:30"
+      }
+    ]
+  },
+  {
+    "id": "uagrm-facultad-de-ciencias-del-habitat",
+    "nombre": "UAGRM, Facultad de Ciencias del Hábitat",
+    "direccion": "Av. San Martín # 146 / Calle Seoane # 141, entre Libertad y 21 de Mayo",
+    "lat": -17.770090791578752,
+    "lng": -63.19204712641274,
+    "area": "Centro Educativo",
+    "responsable": "Nicole Kiara Andrade Rodríguez",
+    "whatsapp": "79941003",
+    "redes": {
+      "facebook": "https://www.facebook.com/FacultadDelHabitatUAGRM/"
+    },
+    "descripcion": "UAGRM, Facultad de Ciencias del Hábitat.",
+    "inicio_actividades": "18:00",
+    "fin_actividades": "23:00",
+    "num_actividades": 6,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/uagrm-facultad-de-ciencias-del-habitat-QPHXPSNRBF.jpg",
+    "actividades": [
+      {
+        "nombre": "Recorrido y visita guiada.",
+        "inicio": "18:00",
+        "fin": "23:00"
+      },
+      {
+        "nombre": "Presentación teatral del elenco Hábitat.",
+        "inicio": "19:00",
+        "fin": "22:30"
+      }
+    ]
+  },
+  {
+    "id": "universidad-de-los-andes-unandes",
+    "nombre": "Universidad de los Andes - Unandes",
+    "direccion": "Avenida Suárez Arana, entre primer y segundo anillo",
+    "lat": -17.776540938883734,
+    "lng": -63.17044621142433,
+    "area": "Centro Educativo",
+    "responsable": "Salathyel Quinteros",
+    "whatsapp": "77526988",
+    "redes": {
+      "facebook": "https://www.facebook.com/UnandesSantaCruz",
+      "instagram": "https://www.instagram.com/unandessantacruz"
+    },
+    "descripcion": "La Universidad de los Andes (Unandes) es una institución comprometida con la educación basada en el 'aprender haciendo', incentivando la investigación, la interacción social y la difusión cultural.",
+    "inicio_actividades": "15:00",
+    "fin_actividades": "22:00",
+    "num_actividades": 7,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/universidad-de-los-andes-unandes-X24KQXK4EZ.jpg",
+    "actividades": [
+      {
+        "nombre": "Exposición de Arte.",
+        "inicio": "17:00",
+        "fin": "23:00"
+      }
+    ]
+  },
+  {
+    "id": "universidad-del-valle-santa-cruz-univalle",
+    "nombre": "Universidad del Valle Santa Cruz - Univalle",
+    "direccion": "Avenida Cristo Redentor, esquina avenida Juan Pablo II, séptimo anillo",
+    "lat": -17.722202,
+    "lng": -63.174564,
+    "area": "Centro Educativo",
+    "responsable": "Patrick Pavisich Ribera",
+    "whatsapp": "70821950",
+    "redes": {
+      "facebook": "https://www.facebook.com/univallesc",
+      "instagram": "https://www.instagram.com/univalle_santacruz"
+    },
+    "descripcion": "Santa Cruz forma parte del Sistema Nacional de Educación de Univalle, con más de 30 años de trayectoria. Fue nombrada 'Obra Arquitectónica de 2022' y es el primer Campus Eco Smart de Bolivia.",
+    "inicio_actividades": "18:00",
+    "fin_actividades": "22:00",
+    "num_actividades": 5,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/universidad-del-valle-santa-cruz-univalle-803V6560ZK.jpg",
+    "actividades": [
+      {
+        "nombre": "Exposición y actividad cultural.",
+        "inicio": "18:00",
+        "fin": "22:00"
+      }
+    ]
+  },
+  {
+    "id": "universidad-nacional-ecologica",
+    "nombre": "Universidad Nacional Ecológica",
+    "direccion": "Calle Potosí # 660, entre Moldes y Saavedra",
+    "lat": -17.78950182086672,
+    "lng": -63.175964712472535,
+    "area": "Centro Educativo",
+    "responsable": "Carmelita Limpias Calvimontes",
+    "whatsapp": "70030745",
+    "redes": {},
+    "descripcion": "Universidad Nacional Ecológica.",
+    "inicio_actividades": "16:00",
+    "fin_actividades": "23:00",
+    "num_actividades": 1,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/universidad-nacional-ecologica-9NUB9VDPM4.jpg",
+    "actividades": []
+  },
+  {
+    "id": "utepsa-universidad-tecnologica-privasa-santa-cruz",
+    "nombre": "Universidad Tecnológica Privada de Santa Cruz de la Sierra (UTEPSA)",
+    "direccion": "Tercer anillo interno, entre avenidas Busch y San Martín # 715",
+    "lat": -17.76762503383745,
+    "lng": -63.20071942757048,
+    "area": "Centro Educativo",
+    "responsable": "Franklin Vargas Medina",
+    "whatsapp": "62555520",
+    "redes": {
+      "facebook": "https://www.facebook.com/UTEPSA/",
+      "instagram": "https://www.instagram.com/universidadutepsa/"
+    },
+    "descripcion": "La Universidad Tecnológica Privada de Santa Cruz de la Sierra (UTEPSA) cuenta con un sistema de educación integral centrado en los estudiantes, orientado a la formación del desarrollo de habilidades.",
+    "inicio_actividades": "15:30",
+    "fin_actividades": "21:00",
+    "num_actividades": 2,
+    "logo": "https://cultura.gmsantacruz.gob.bo/img/larga-noche-de-los-museos/2026/logos/utepsa-universidad-tecnologica-privasa-santa-cruz-ULNH7DKAJW.jpg",
+    "actividades": [
+      {
+        "nombre": "Arte que conecta.",
+        "inicio": "15:00",
+        "fin": "21:00"
+      },
+      {
+        "nombre": "Pintura en vivo.",
+        "inicio": "19:30",
+        "fin": "20:30"
+      }
+    ]
+  }
+        ];
+
+        // ==========================================
+        // 2. LÓGICA DEL MOTOR DE TIEMPO
+        // ==========================================
+        
+        // Convierte un string "HH:MM" en un objeto Date del día de hoy para comparar
+        function parseTimeStringToDate(timeStr) {
+            const [hours, minutes] = timeStr.split(':').map(Number);
+            const d = new Date();
+            d.setHours(hours, minutes, 0, 0);
+            return d;
+        }
+
+        // Determina cuál es la actividad actual en una ubicación
+        function getCurrentActivity(actividades) {
+            const nowTime = new Date();
+            for (let act of actividades) {
+                const startTime = parseTimeStringToDate(act.inicio);
+                const endTime = parseTimeStringToDate(act.fin);
+                
+                if (nowTime >= startTime && nowTime <= endTime) {
+                    return act; // Retorna la actividad en curso
+                }
+            }
+            return null; // Ninguna actividad en este momento
+        }
+
+        // ==========================================
+        // 3. CONFIGURACIÓN DEL MAPA (LEAFLET)
+        // ==========================================
+        
+        // Inicializar el mapa centrado en La Paz, Bolivia
+        const map = L.map('map').setView([-17.783331, -63.182135], 13);
+
+        // Añadir capa de OpenStreetMap (Gratuita)
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; OpenStreetMap contributors'
+        }).addTo(map);
+
+        // Objeto para almacenar las referencias a los marcadores y poder actualizarlos
+        const markersMap = {};
+
+        // Función para renderizar los marcadores inicialmente
+        function renderMapMarkers() {
+            jsonData.forEach(location => {
+                // Crear el marcador
+                const marker = L.marker([location.lat, location.lng]).addTo(map);
+                
+                // Evaluar estado actual
+                const currentAct = getCurrentActivity(location.actividades);
+                const tooltipText = currentAct ? `🔴 AHORA: ${currentAct.nombre}` : `⚪ Sin actividad actual`;
+                const tooltipClass = currentAct ? 'custom-tooltip' : 'custom-tooltip tooltip-inactive';
+
+                // Añadir etiqueta (Tooltip) visible permanentemente
+                marker.bindTooltip(tooltipText, {
+                    permanent: true,
+                    direction: 'top',
+                    className: tooltipClass,
+                    offset: [0, -20],
+		    interactive: true
+                });
+
+                // Añadir evento de Click para abrir detalles
+                marker.on('click', () => {
+                    openDetailsPanel(location);
+                });
+
+                // Guardar referencia
+                markersMap[location.id] = { marker, data: location };
+            });
+        }
+
+        // ==========================================
+        // 4. ACTUALIZACIÓN DINÁMICA (CADA MINUTO)
+        // ==========================================
+        function updateMapMarkers() {
+            for (const id in markersMap) {
+                const item = markersMap[id];
+                const currentAct = getCurrentActivity(item.data.actividades);
+                
+                const tooltipText = currentAct ? `🔴 AHORA: ${currentAct.nombre}` : `⚪ Sin actividad actual`;
+                const tooltipClass = currentAct ? 'custom-tooltip' : 'custom-tooltip tooltip-inactive';
+                
+                // Actualizar el contenido y estilo del tooltip
+                item.marker.setTooltipContent(tooltipText);
+                item.marker.getTooltip().options.className = tooltipClass;
+            }
+            console.log("Estado de actividades actualizado:", new Date().toLocaleTimeString());
+        }
+
+        // Ejecutar actualización cada 60 segundos (60000 ms)
+        setInterval(updateMapMarkers, 60000);
+
+        // ==========================================
+        // 5. LÓGICA DE LA INTERFAZ DE USUARIO (PANEL)
+        // ==========================================
+        const panel = document.getElementById('details-panel');
+        
+        function openDetailsPanel(locationData) {
+            // Llenar cabecera y contacto
+            document.getElementById('panel-title').textContent = locationData.nombre;
+            document.getElementById('panel-phone').textContent = locationData.whatsapp;
+            document.getElementById('panel-email').textContent = locationData.direccion;
+           
+
+            // Llenar cronograma
+            const activitiesContainer = document.getElementById('panel-activities');
+            activitiesContainer.innerHTML = ''; // Limpiar anteriores
+
+            const nowTime = new Date();
+
+            locationData.actividades.forEach(act => {
+                const startTime = parseTimeStringToDate(act.inicio);
+                const endTime = parseTimeStringToDate(act.fin);
+                
+                let statusBadge = '';
+                let borderClass = 'border-l-4 border-transparent';
+                
+                // Determinar el estado visual de la actividad en la lista
+                if (nowTime > endTime) {
+                    statusBadge = '<span class="text-xs bg-gray-200 text-gray-600 px-2 py-1 rounded ml-2">Finalizado</span>';
+                } else if (nowTime >= startTime && nowTime <= endTime) {
+                    statusBadge = '<span class="text-xs bg-red-100 text-red-600 font-bold px-2 py-1 rounded ml-2 animate-pulse">En curso</span>';
+                    borderClass = 'border-l-4 border-red-500 bg-red-50'; // Resaltar actividad actual
+                } else {
+                    statusBadge = '<span class="text-xs bg-blue-100 text-blue-600 px-2 py-1 rounded ml-2">Próximamente</span>';
+                }
+
+                const actHTML = `
+                    <li class="p-3 rounded bg-white shadow-sm border border-gray-100 ${borderClass}">
+                        <div class="flex justify-between items-start mb-1">
+                            <span class="font-bold text-gray-800">${act.nombre}</span>
+                            ${statusBadge}
+                        </div>
+                        <div class="text-sm font-medium text-blue-600 mb-1">
+                            🕒 ${act.inicio} - ${act.fin}
+                        </div>
+                    </li>
+                `;
+                activitiesContainer.innerHTML += actHTML;
+            });
+
+            // Mostrar el panel
+            panel.classList.remove('panel-hidden');
+            panel.classList.add('panel-visible');
+        }
+
+        function closePanel() {
+            panel.classList.remove('panel-visible');
+            panel.classList.add('panel-hidden');
+        }
+
+        // ==========================================
+        // 6. INICIALIZACIÓN
+        // ==========================================
+        renderMapMarkers();
+
+    </script>
+</body>
+</html>
